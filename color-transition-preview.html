@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>颜色提取 · 过渡插值预览</title>
+<style>
+  :root { --panel-bg: rgba(20,20,26,.72); }
+  * { box-sizing: border-box; -webkit-user-drag: none; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #fff; overflow: hidden; user-select: none;
+    background: #111;
+  }
+
+  /* ---- 背景层(过渡颜色) ---- */
+  #bg { position: fixed; inset: 0; z-index: 0; }
+  .bg-half { position: absolute; top: 0; bottom: 0; }
+  #bgL { left: 0; width: 100%; }
+  #bgR { right: 0; width: 50%; display: none; box-shadow: -1px 0 0 rgba(255,255,255,.25); }
+  body.split #bgL { width: 50%; }
+  body.split #bgR { display: block; }
+  .bg-label {
+    position: absolute; bottom: 18px; left: 0; right: 0; text-align: center;
+    font-size: 12px; letter-spacing: .05em; color: rgba(255,255,255,.85);
+    text-shadow: 0 1px 3px rgba(0,0,0,.5); display: none;
+  }
+  body.split .bg-label { display: block; }
+
+  /* ---- 舞台 & 圆形轮播 ---- */
+  #stage {
+    position: relative; z-index: 1; height: 100%;
+    display: flex; align-items: center; overflow: hidden;
+    touch-action: pan-y; cursor: grab;
+  }
+  #stage:active { cursor: grabbing; }
+  #track {
+    display: flex; align-items: center; gap: 56px;
+    transition: transform .55s cubic-bezier(.4,0,.2,1);
+    will-change: transform;
+  }
+  .item {
+    flex: 0 0 auto; width: 200px; height: 200px; border-radius: 50%;
+    object-fit: cover; background: rgba(255,255,255,.1);
+    box-shadow: 0 20px 50px rgba(0,0,0,.45), 0 0 0 6px rgba(255,255,255,.12);
+    transition: transform .55s cubic-bezier(.4,0,.2,1), opacity .55s;
+    opacity: .5; transform: scale(.62); cursor: pointer;
+  }
+
+  /* ---- 分页点 ---- */
+  #dots {
+    position: fixed; z-index: 2; left: 0; right: 0; bottom: 26px;
+    display: flex; justify-content: center; gap: 9px;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 5px; background: rgba(255,255,255,.4);
+    transition: all .3s; cursor: pointer;
+  }
+  .dot.on { width: 24px; background: #fff; }
+
+  /* ---- 配置面板 ---- */
+  #panel {
+    position: fixed; z-index: 3; top: 18px; right: 18px; width: 268px;
+    background: var(--panel-bg); backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 16px;
+    padding: 16px 16px 14px; font-size: 13px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.4);
+  }
+  #panel h1 { font-size: 13px; margin: 0 0 12px; opacity: .7; font-weight: 600; letter-spacing: .04em; }
+  .row { display: flex; align-items: center; justify-content: space-between; margin: 10px 0; gap: 10px; }
+  .row label { opacity: .8; white-space: nowrap; }
+  select, input[type=range] { accent-color: #fff; }
+  select {
+    background: #23232e; color: #fff; border: 1px solid rgba(255,255,255,.2);
+    border-radius: 8px; padding: 5px 8px; font-size: 12px; flex: 1; min-width: 0;
+  }
+  select option { background: #23232e; color: #fff; }
+  select:disabled { opacity: .35; }
+  input[type=range] { flex: 1; min-width: 0; }
+  .cur { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .cur .sw { width: 34px; height: 34px; border-radius: 9px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }
+  .cur .meta { line-height: 1.35; }
+  .cur .hex { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  .cur .sub { opacity: .55; font-size: 11px; }
+  .switch { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  .hint { margin-top: 12px; font-size: 11px; opacity: .5; line-height: 1.5; }
+  details { margin-top: 10px; }
+  details summary { cursor: pointer; opacity: .6; font-size: 11px; }
+  details .legend { font-size: 11px; opacity: .6; line-height: 1.6; margin-top: 6px; }
+  .val { font-family: ui-monospace, monospace; opacity: .7; min-width: 46px; text-align: right; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div id="bg">
+    <div id="bgL" class="bg-half"><div class="bg-label" id="labelL"></div></div>
+    <div id="bgR" class="bg-half"><div class="bg-label" id="labelR"></div></div>
+  </div>
+
+  <div id="stage"><div id="track"></div></div>
+  <div id="dots"></div>
+
+  <div id="panel">
+    <h1>取色 · 过渡插值预览</h1>
+    <div class="cur">
+      <div class="sw" id="curSw"></div>
+      <div class="meta">
+        <div class="hex" id="curHex">#000000</div>
+        <div class="sub" id="curName">—</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <label>主算法(左)</label>
+      <select id="methodL"></select>
+    </div>
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="splitChk"> 分屏对比</label>
+    </div>
+    <div class="row">
+      <label>对比(右)</label>
+      <select id="methodR" disabled></select>
+    </div>
+    <div class="row">
+      <label>时长</label>
+      <input type="range" id="dur" min="150" max="2500" step="50" value="700">
+      <span class="val" id="durVal">700ms</span>
+    </div>
+    <div class="row">
+      <label>缓动</label>
+      <select id="ease"></select>
+    </div>
+    <div class="row">
+      <label>取色</label>
+      <select id="pick">
+        <option value="vibrant">鲜艳 (Vibrant)</option>
+        <option value="dominant">主色 (Dominant)</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>背景</label>
+      <select id="bgStyle">
+        <option value="gradient">渐变 (Spotify 感)</option>
+        <option value="solid">纯色 (验证用)</option>
+      </select>
+    </div>
+
+    <div class="hint">滚轮 / 拖拽 / ← → 切换图片</div>
+    <details>
+      <summary>算法说明</summary>
+      <div class="legend">
+        <b>sRGB 直插</b>:基线,中间易发脏<br>
+        <b>gamma-linear</b>:线性光插值,嵌入式推荐<br>
+        <b>HSL</b>:色相可能绕路<br>
+        <b>CIELAB</b>:感知均匀,Android 现成<br>
+        <b>OKLab</b>:最优,色相稳定
+      </div>
+    </details>
+  </div>
+
+  <script src="img-data.js"></script>
+  <script>
+  "use strict";
+  // ============================================================
+  //  颜色基础工具
+  // ============================================================
+  const clampByte = v => Math.max(0, Math.min(255, Math.round(v)));
+  const mix = (a, b, t) => a + (b - a) * t;
+  const s2l = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  const l2s = c => { c = c <= 0.0031308 ? c * 12.92 : 1.055 * (c ** (1/2.4)) - 0.055; return clampByte(c * 255); };
+  const toHex = c => '#' + [c.r, c.g, c.b].map(v => clampByte(v).toString(16).padStart(2,'0')).join('');
+  const darken = (c, f) => ({ r: c.r*(1-f), g: c.g*(1-f), b: c.b*(1-f) });
+
+  function rgbToHsl(r, g, b) {
+    r/=255; g/=255; b/=255;
+    const mx = Math.max(r,g,b), mn = Math.min(r,g,b), d = mx-mn;
+    let h = 0;
+    if (d) {
+      if (mx === r) h = ((g-b)/d) % 6;
+      else if (mx === g) h = (b-r)/d + 2;
+      else h = (r-g)/d + 4;
+      h *= 60; if (h < 0) h += 360;
+    }
+    const l = (mx+mn)/2;
+    const s = d === 0 ? 0 : d / (1 - Math.abs(2*l - 1));
+    return { h, s, l };
+  }
+  function hslToRgb(h, s, l) {
+    const c = (1 - Math.abs(2*l - 1)) * s;
+    const x = c * (1 - Math.abs((h/60) % 2 - 1));
+    const m = l - c/2;
+    let r=0,g=0,b=0;
+    if (h < 60)      [r,g,b] = [c,x,0];
+    else if (h <120) [r,g,b] = [x,c,0];
+    else if (h <180) [r,g,b] = [0,c,x];
+    else if (h <240) [r,g,b] = [0,x,c];
+    else if (h <300) [r,g,b] = [x,0,c];
+    else             [r,g,b] = [c,0,x];
+    return { r: (r+m)*255, g: (g+m)*255, b: (b+m)*255 };
+  }
+
+  // ---- CIELAB (D65) ----
+  function rgbToLab({r,g,b}) {
+    const R=s2l(r), G=s2l(g), B=s2l(b);
+    const x=(R*0.4124564+G*0.3575761+B*0.1804375)/0.95047;
+    const y=(R*0.2126729+G*0.7151522+B*0.0721750)/1.0;
+    const z=(R*0.0193339+G*0.1191920+B*0.9503041)/1.08883;
+    const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787*t + 16/116;
+    const fx=f(x), fy=f(y), fz=f(z);
+    return [116*fy-16, 500*(fx-fy), 200*(fy-fz)];
+  }
+  function labToRgb(L,a,b) {
+    const fy=(L+16)/116, fx=fy+a/500, fz=fy-b/200;
+    const fi = t => { const t3=t*t*t; return t3 > 0.008856 ? t3 : (t-16/116)/7.787; };
+    const x=fi(fx)*0.95047, y=fi(fy)*1.0, z=fi(fz)*1.08883;
+    const R= x*3.2404542 + y*-1.5371385 + z*-0.4985314;
+    const G= x*-0.9692660+ y*1.8760108 + z*0.0415560;
+    const B= x*0.0556434 + y*-0.2040259+ z*1.0572252;
+    return { r: l2s(R), g: l2s(G), b: l2s(B) };
+  }
+
+  // ---- OKLab (Ottosson) ----
+  function rgbToOklab({r,g,b}) {
+    const R=s2l(r), G=s2l(g), B=s2l(b);
+    const l=0.4122214708*R+0.5363325363*G+0.0514459929*B;
+    const m=0.2119034982*R+0.6806995451*G+0.1073969566*B;
+    const s=0.0883024619*R+0.2817188376*G+0.6299787005*B;
+    const l_=Math.cbrt(l), m_=Math.cbrt(m), s_=Math.cbrt(s);
+    return [
+      0.2104542553*l_+0.7936177850*m_-0.0040720468*s_,
+      1.9779984951*l_-2.4285922050*m_+0.4505937099*s_,
+      0.0259040371*l_+0.7827717662*m_-0.8086757660*s_,
+    ];
+  }
+  function oklabToRgb(L,a,b) {
+    const l_=L+0.3963377774*a+0.2158037573*b;
+    const m_=L-0.1055613458*a-0.0638541728*b;
+    const s_=L-0.0894841775*a-1.2914855480*b;
+    const l=l_**3, m=m_**3, s=s_**3;
+    return {
+      r: l2s(+4.0767416621*l-3.3077115913*m+0.2309699292*s),
+      g: l2s(-1.2684380046*l+2.6097574011*m-0.3413193965*s),
+      b: l2s(-0.0041960863*l-0.7034186147*m+1.7076147010*s),
+    };
+  }
+
+  // ============================================================
+  //  插值算法(A,B: {r,g,b} 0..255,t: 0..1)
+  // ============================================================
+  const METHODS = {
+    srgb:  { name: 'sRGB 直插', fn: (A,B,t) => ({ r: mix(A.r,B.r,t), g: mix(A.g,B.g,t), b: mix(A.b,B.b,t) }) },
+    glin:  { name: 'gamma-linear', fn: (A,B,t) => ({
+               r: l2s(mix(s2l(A.r),s2l(B.r),t)),
+               g: l2s(mix(s2l(A.g),s2l(B.g),t)),
+               b: l2s(mix(s2l(A.b),s2l(B.b),t)) }) },
+    hsl:   { name: 'HSL', fn: (A,B,t) => {
+               const a=rgbToHsl(A.r,A.g,A.b), b=rgbToHsl(B.r,B.g,B.b);
+               let dh=b.h-a.h; if(dh>180)dh-=360; if(dh<-180)dh+=360;
+               return hslToRgb((a.h+dh*t+360)%360, mix(a.s,b.s,t), mix(a.l,b.l,t)); } },
+    lab:   { name: 'CIELAB', fn: (A,B,t) => {
+               const a=rgbToLab(A), b=rgbToLab(B);
+               return labToRgb(mix(a[0],b[0],t), mix(a[1],b[1],t), mix(a[2],b[2],t)); } },
+    oklab: { name: 'OKLab', fn: (A,B,t) => {
+               const a=rgbToOklab(A), b=rgbToOklab(B);
+               return oklabToRgb(mix(a[0],b[0],t), mix(a[1],b[1],t), mix(a[2],b[2],t)); } },
+  };
+
+  const EASINGS = {
+    linear:         { name: '线性', fn: t => t },
+    smoothstep:     { name: 'Smoothstep', fn: t => t*t*(3-2*t) },
+    easeInOutCubic: { name: 'Ease-in-out', fn: t => t < 0.5 ? 4*t*t*t : 1 - ((-2*t+2)**3)/2 },
+    easeOutCubic:   { name: 'Ease-out', fn: t => 1 - (1-t)**3 },
+  };
+
+  // ============================================================
+  //  取色:Median Cut + 打分挑选
+  // ============================================================
+  function medianCut(pixels, depth, maxDepth) {
+    if (!pixels.length) return [];
+    if (depth === maxDepth || pixels.length < 4) {
+      let r=0,g=0,b=0;
+      for (const p of pixels) { r+=p[0]; g+=p[1]; b+=p[2]; }
+      const n = pixels.length;
+      return [[r/n, g/n, b/n, n]];
+    }
+    let rmn=255,rmx=0,gmn=255,gmx=0,bmn=255,bmx=0;
+    for (const p of pixels) {
+      if(p[0]<rmn)rmn=p[0]; if(p[0]>rmx)rmx=p[0];
+      if(p[1]<gmn)gmn=p[1]; if(p[1]>gmx)gmx=p[1];
+      if(p[2]<bmn)bmn=p[2]; if(p[2]>bmx)bmx=p[2];
+    }
+    const rr=rmx-rmn, gr=gmx-gmn, br=bmx-bmn;
+    const ch = (rr>=gr && rr>=br) ? 0 : (gr>=br ? 1 : 2);
+    pixels.sort((a,b) => a[ch]-b[ch]);
+    const mid = pixels.length >> 1;
+    return medianCut(pixels.slice(0,mid), depth+1, maxDepth)
+      .concat(medianCut(pixels.slice(mid), depth+1, maxDepth));
+  }
+
+  function extract(img) {
+    const S = 96;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = S;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, S, S);
+    const data = ctx.getImageData(0, 0, S, S).data;
+    const pixels = [];
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i+3] < 128) continue;            // 跳过透明
+      pixels.push([data[i], data[i+1], data[i+2]]);
+    }
+    const boxes = medianCut(pixels, 0, 4);       // 最多 16 个色块
+    // 分别挑“鲜艳”与“主色”
+    let vib=null, vs=-1, dom=null, ds=-1;
+    for (const [r,g,b,cnt] of boxes) {
+      const { s, l } = rgbToHsl(r,g,b);
+      const lightPenalty = (l < 0.12 || l > 0.92) ? 0.15 : 1;
+      const vibScore = cnt * (0.35 + s) * lightPenalty;   // 鲜艳:偏饱和
+      const domScore = cnt * lightPenalty;                // 主色:偏数量
+      if (vibScore > vs) { vs = vibScore; vib = {r,g,b}; }
+      if (domScore > ds) { ds = domScore; dom = {r,g,b}; }
+    }
+    const norm = c => ({ r: Math.round(c.r), g: Math.round(c.g), b: Math.round(c.b) });
+    return { vibrant: norm(vib), dominant: norm(dom) };
+  }
+
+  // ============================================================
+  //  应用与状态
+  // ============================================================
+  const bgL = document.getElementById('bgL'), bgR = document.getElementById('bgR');
+  const labelL = document.getElementById('labelL'), labelR = document.getElementById('labelR');
+  const track = document.getElementById('track'), stage = document.getElementById('stage');
+  const dotsEl = document.getElementById('dots');
+
+  const ITEMS = window.IMAGES || [];
+  const state = {
+    index: 0,
+    methodL: 'oklab', methodR: 'srgb', split: false,
+    dur: 700, ease: 'easeInOutCubic', pick: 'vibrant', bgStyle: 'gradient',
+    colors: [],            // 每图 {vibrant,dominant}
+    curL: {r:20,g:20,b:26}, curR: {r:20,g:20,b:26},
+    fromL: null, fromR: null, to: null, tStart: 0, animating: false,
+  };
+
+  const colorOf = i => {
+    const c = state.colors[i];
+    return c ? c[state.pick] : { r:40, g:40, b:48 };
+  };
+  const grad = c => {
+    const rgb = `rgb(${c.r|0},${c.g|0},${c.b|0})`;
+    if (state.bgStyle === 'solid') return rgb;      // 纯色:便于验证插值结果
+    const d = darken(c, 0.55);
+    return `linear-gradient(160deg, ${rgb}, rgb(${d.r|0},${d.g|0},${d.b|0}))`;
+  };
+
+  function applyBg() {
+    bgL.style.background = grad(state.curL);
+    if (state.split) bgR.style.background = grad(state.curR);
+  }
+
+  // ---- 过渡引擎:每次切换从“当前显示色”重定向 ----
+  function retarget() {
+    state.fromL = { ...state.curL };
+    state.fromR = { ...state.curR };
+    state.to = colorOf(state.index);
+    state.tStart = performance.now();
+    state.animating = true;
+  }
+  function loop(now) {
+    if (state.animating) {
+      let t = (now - state.tStart) / state.dur;
+      if (t >= 1) { t = 1; state.animating = false; }
+      const e = EASINGS[state.ease].fn(t);
+      state.curL = METHODS[state.methodL].fn(state.fromL, state.to, e);
+      state.curR = state.split ? METHODS[state.methodR].fn(state.fromR, state.to, e) : state.curL;
+      applyBg();
+      updateReadout();
+    }
+    requestAnimationFrame(loop);
+  }
+
+  function updateReadout() {
+    document.getElementById('curSw').style.background = toHex(state.curL);
+    document.getElementById('curHex').textContent = toHex(colorOf(state.index));
+    document.getElementById('curName').textContent =
+      (ITEMS[state.index]?.name || '—') + `  (${state.index+1}/${ITEMS.length})`;
+  }
+
+  // ---- 布局轮播 ----
+  const BASE = 200, GAP = 56, ADVANCE = BASE + GAP;
+  function baseTX() { return stage.clientWidth/2 - (state.index*ADVANCE + BASE/2); }
+  function layout(withAnim = true) {
+    track.style.transition = withAnim ? '' : 'none';
+    track.style.transform = `translateX(${baseTX()}px)`;
+    [...track.children].forEach((el, i) => {
+      const dist = Math.abs(i - state.index);
+      el.style.transform = dist === 0 ? 'scale(1)' : `scale(${Math.max(0.5, 0.68 - (dist-1)*0.08)})`;
+      el.style.opacity = dist === 0 ? 1 : Math.max(0.28, 0.55 - (dist-1)*0.12);
+    });
+    [...dotsEl.children].forEach((d, i) => d.classList.toggle('on', i === state.index));
+  }
+
+  function go(i) {
+    i = Math.max(0, Math.min(ITEMS.length - 1, i));
+    if (i === state.index && state.to) return;
+    state.index = i;
+    layout();
+    retarget();
+  }
+
+  // ============================================================
+  //  构建 DOM
+  // ============================================================
+  ITEMS.forEach((it, i) => {
+    const img = new Image();
+    img.className = 'item';
+    img.src = it.src;
+    img.addEventListener('click', () => { if (!suppressClick) go(i); });
+    img.addEventListener('load', () => {
+      try { state.colors[i] = extract(img); }
+      catch (e) { state.colors[i] = { vibrant:{r:80,g:80,b:96}, dominant:{r:80,g:80,b:96} }; }
+      if (i === state.index) {           // 首图:直接落色,无动画
+        state.curL = state.curR = { ...colorOf(i) };
+        applyBg(); updateReadout();
+      }
+    });
+    track.appendChild(img);
+
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    dot.addEventListener('click', () => go(i));
+    dotsEl.appendChild(dot);
+  });
+
+  // ============================================================
+  //  交互:拖拽 / 滚轮 / 键盘
+  // ============================================================
+  let dragging = false, startX = 0, dragDX = 0, suppressClick = false;
+  stage.addEventListener('pointerdown', e => {
+    dragging = true; startX = e.clientX; dragDX = 0;
+    track.style.transition = 'none';
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    dragDX = e.clientX - startX;
+    track.style.transform = `translateX(${baseTX() + dragDX}px)`;
+  });
+  stage.addEventListener('pointerup', e => {
+    if (!dragging) return;
+    dragging = false;
+    track.style.transition = '';
+    if (Math.abs(dragDX) > 5) { suppressClick = true; setTimeout(() => suppressClick = false, 30); }
+    if (Math.abs(dragDX) > 60) go(state.index + (dragDX < 0 ? 1 : -1));
+    else layout();
+  });
+
+  let wheelAcc = 0, wheelLock = false;
+  stage.addEventListener('wheel', e => {
+    e.preventDefault();
+    wheelAcc += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (!wheelLock && Math.abs(wheelAcc) > 40) {
+      go(state.index + (wheelAcc > 0 ? 1 : -1));
+      wheelAcc = 0; wheelLock = true; setTimeout(() => wheelLock = false, 260);
+    }
+  }, { passive: false });
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') go(state.index + 1);
+    else if (e.key === 'ArrowLeft') go(state.index - 1);
+  });
+  window.addEventListener('resize', () => layout(false));
+
+  // ============================================================
+  //  配置面板绑定
+  // ============================================================
+  function fillSelect(el, obj, val) {
+    for (const k in obj) {
+      const o = document.createElement('option');
+      o.value = k; o.textContent = obj[k].name; el.appendChild(o);
+    }
+    el.value = val;
+  }
+  const mL = document.getElementById('methodL'), mR = document.getElementById('methodR');
+  fillSelect(mL, METHODS, state.methodL);
+  fillSelect(mR, METHODS, state.methodR);
+  fillSelect(document.getElementById('ease'), EASINGS, state.ease);
+
+  mL.addEventListener('change', e => { state.methodL = e.target.value; labelL.textContent = '左:' + METHODS[state.methodL].name; });
+  mR.addEventListener('change', e => { state.methodR = e.target.value; labelR.textContent = '右:' + METHODS[state.methodR].name; });
+  document.getElementById('ease').addEventListener('change', e => state.ease = e.target.value);
+  document.getElementById('splitChk').addEventListener('change', e => {
+    state.split = e.target.checked;
+    document.body.classList.toggle('split', state.split);
+    mR.disabled = !state.split;
+    labelL.textContent = '左:' + METHODS[state.methodL].name;
+    labelR.textContent = '右:' + METHODS[state.methodR].name;
+    state.curR = { ...state.curL }; applyBg();
+  });
+  const durEl = document.getElementById('dur'), durVal = document.getElementById('durVal');
+  durEl.addEventListener('input', e => { state.dur = +e.target.value; durVal.textContent = state.dur + 'ms'; });
+  document.getElementById('pick').addEventListener('change', e => {
+    state.pick = e.target.value;
+    state.curL = state.curR = { ...colorOf(state.index) };  // 重新落色
+    applyBg(); updateReadout();
+  });
+  document.getElementById('bgStyle').addEventListener('change', e => {
+    state.bgStyle = e.target.value; applyBg();
+  });
+
+  // ============================================================
+  //  启动
+  // ============================================================
+  if (!ITEMS.length) {
+    document.body.innerHTML = '<p style="padding:40px">未找到 img-data.js 中的图片,请先生成该文件。</p>';
+  } else {
+    layout(false);
+    updateReadout();
+    requestAnimationFrame(loop);
+  }
+  </script>
+</body>
+</html>
