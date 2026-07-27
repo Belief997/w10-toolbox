@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>抛硬币动画 · 3D · 可导出视频</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #1a1a1f; overflow: hidden; user-select: none;
+    background: #e9edf2;
+    display: flex;
+  }
+
+  /* ---- 舞台(白底,画布在此居中) ---- */
+  #stage {
+    flex: 1; min-width: 0; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(120% 120% at 50% 40%, #ffffff 0%, #eef1f5 70%, #e4e8ee 100%);
+  }
+  #cv {
+    background: #fff; border-radius: 10px;
+    box-shadow: 0 18px 60px rgba(20,30,50,.18), 0 0 0 1px rgba(0,0,0,.05);
+    cursor: pointer;
+  }
+
+  /* ---- 右侧配置面板 ---- */
+  #panel {
+    width: 288px; flex: 0 0 288px; height: 100%;
+    background: rgba(255,255,255,.86); backdrop-filter: blur(14px);
+    border-left: 1px solid rgba(0,0,0,.08);
+    padding: 20px 18px; overflow-y: auto;
+    box-shadow: -8px 0 30px rgba(20,30,50,.06);
+  }
+  #panel h1 { font-size: 15px; margin: 0 0 4px; font-weight: 700; letter-spacing: .02em; }
+  #panel .sub { font-size: 12px; opacity: .55; margin: 0 0 18px; }
+
+  .group { margin: 0 0 18px; }
+  .group > .gt {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    opacity: .45; margin: 0 0 9px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
+  .row label { font-size: 13px; opacity: .8; white-space: nowrap; flex: 0 0 auto; }
+  .row .val { margin-left: auto; font-family: ui-monospace, Consolas, monospace; font-size: 12px; opacity: .7; min-width: 44px; text-align: right; }
+
+  input[type=number] {
+    width: 74px; padding: 6px 8px; font-size: 13px; text-align: center;
+    border: 1px solid rgba(0,0,0,.16); border-radius: 8px; background: #fff; color: inherit;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  input[type=range] { flex: 1; min-width: 0; accent-color: #f4b400; }
+  select {
+    flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid rgba(0,0,0,.16);
+    border-radius: 8px; background: #fff; color: inherit;
+  }
+  .times { opacity: .5; }
+
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .presets button {
+    flex: 1 1 auto; padding: 5px 6px; font-size: 11px; border-radius: 7px;
+    border: 1px solid rgba(0,0,0,.14); background: #fff; color: inherit; cursor: pointer;
+    font-family: ui-monospace, Consolas, monospace; white-space: nowrap;
+  }
+  .presets button:hover { background: #f3f5f8; }
+
+  button.primary {
+    width: 100%; padding: 12px; margin-top: 4px; font-size: 14px; font-weight: 600;
+    border: none; border-radius: 11px; cursor: pointer; color: #3a2c00;
+    background: linear-gradient(180deg, #ffd24d, #f4b400);
+    box-shadow: 0 6px 18px rgba(244,180,0,.4);
+  }
+  button.primary:hover { filter: brightness(1.04); }
+  button.ghost {
+    width: 100%; padding: 11px; margin-top: 10px; font-size: 14px; font-weight: 600;
+    border: 1px solid rgba(0,0,0,.16); border-radius: 11px; cursor: pointer;
+    background: #fff; color: inherit;
+  }
+  button.ghost:hover { background: #f3f5f8; }
+  button:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; filter: none; }
+
+  #result {
+    margin-top: 14px; text-align: center; font-size: 13px; opacity: .75; min-height: 20px;
+  }
+  #result b { font-size: 15px; }
+  #result .yes { color: #14914d; }
+  #result .no  { color: #d92d20; }
+
+  .hint { margin-top: 16px; font-size: 11px; opacity: .5; line-height: 1.7; }
+  kbd {
+    font-family: ui-monospace, monospace; font-size: 10px; padding: 1px 5px;
+    border: 1px solid rgba(0,0,0,.2); border-bottom-width: 2px; border-radius: 4px; background: #fff;
+  }
+  .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #d92d20; margin-right: 6px; animation: blink 1s steps(2, start) infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+
+  #err {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: #fff; color: #b3261e; font-size: 14px; text-align: center; padding: 40px; z-index: 9;
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <aside id="panel">
+    <h1>抛硬币动画 · 3D</h1>
+    <p class="sub">点击硬币 / 空格键抛掷 · 可导出视频</p>
+
+    <div class="group">
+      <div class="gt">导出分辨率</div>
+      <div class="row">
+        <label>宽 × 高</label>
+        <input type="number" id="w" min="64" max="1920" step="1" value="360">
+        <span class="times">×</span>
+        <input type="number" id="h" min="64" max="1920" step="1" value="360">
+      </div>
+      <div class="presets">
+        <button data-res="360,360">360²</button>
+        <button data-res="512,512">512²</button>
+        <button data-res="720,720">720²</button>
+        <button data-res="1080,1080">1080²</button>
+        <button data-res="720,1280">竖 720×1280</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">动画</div>
+      <div class="row">
+        <label>时长</label>
+        <input type="range" id="dur" min="1000" max="4500" step="100" value="2200">
+        <span class="val" id="durVal">2.2s</span>
+      </div>
+      <div class="row">
+        <label>翻转圈数</label>
+        <input type="range" id="spins" min="3" max="12" step="1" value="6">
+        <span class="val" id="spinsVal">6</span>
+      </div>
+      <div class="row">
+        <label>靠近程度</label>
+        <input type="range" id="zoom" min="120" max="300" step="5" value="200">
+        <span class="val" id="zoomVal">2.0×</span>
+      </div>
+      <div class="row">
+        <label>俯视角</label>
+        <input type="range" id="tilt" min="0" max="45" step="1" value="0">
+        <span class="val" id="tiltVal">18°</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">操作</div>
+      <button class="primary" id="flipBtn">掷硬币</button>
+      <button class="ghost" id="recBtn"><span class="row-lbl">导出视频</span></button>
+      <button class="ghost" id="imgBtn">导出图片</button>
+      <div class="row" style="margin-top:12px">
+        <label>帧率</label>
+        <select id="fps"><option value="30">30 fps</option><option value="60" selected>60 fps</option></select>
+      </div>
+      <div id="result">尚未抛掷</div>
+    </div>
+
+    <div class="hint">
+      · 硬币正面 <b>YES</b> / 反面 <b>NO</b>,俯视白底,真 3D 透视与光影。<br>
+      · 点击画布或按 <kbd>空格</kbd> 抛掷。<br>
+      · 导出 <code>.webm</code> 视频 / <code>.png</code> 静态落地图,尺寸 = 上方分辨率(默认 360×360)。<br>
+      · 双击本文件即可离线运行(Three.js 已内置于 <code>lib/</code>)。
+    </div>
+  </aside>
+
+  <div id="err"></div>
+
+<script src="lib/three.min.js"></script>
+<script>
+"use strict";
+(() => {
+  if (typeof THREE === 'undefined') {
+    const e = document.getElementById('err');
+    e.style.display = 'flex';
+    e.textContent = '未能加载 Three.js(lib/three.min.js 缺失)。请确保该文件与本页面在同一目录。';
+    return;
+  }
+
+  const cv = document.getElementById('cv');
+
+  // ---------- 配置 ----------
+  const cfg = { W: 360, H: 360, dur: 2200, halfSpins: 6, zoom: 2.0, tiltDeg: 0, fps: 60 };
+
+  // 场景常量(硬币半径 = 1 个单位)
+  const T        = 0.22;          // 硬币厚度(偏厚,似任天堂金币)
+  const REST_Y   = T / 2;         // 静止时圆心高度(底面贴地 y=0)
+  const CAM_D    = 11;            // 相机到注视点距离
+  const FOV      = 30;
+  const TARGET_Y = 0.45;          // 相机注视点高度
+  const BOUNCE_DUR = 460;         // 落地回弹时长(ms)
+  const BOUNCE_AMP = 0.16;        // 回弹高度(单位 = 硬币半径)
+  const BOUNCE_N   = 2;           // 回弹次数(递减)
+
+  // ---------- 运行状态 ----------
+  let anim = null;                 // {start,dur,flip,spin,jump,result}
+  let rest = { flip: 0, spin: 0 }; // 静止姿态(flip 为 π 整数倍 → 决定朝上的面)
+  let recording = false;
+
+  const easeOutCubic   = t => 1 - Math.pow(1 - t, 3);
+  const easeInOutCubic = t => t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+
+  // ---------- Three.js 场景 ----------
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xffffff);
+
+  // near 收紧到 1(硬币最近约 3.6)、far 40 → 大幅提升深度精度,消除字面与顶面的 z-fighting
+  const camera = new THREE.PerspectiveCamera(FOV, 1, 1, 40);
+
+  const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1);                 // 后备缓冲严格 = 导出像素
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+  // 光照(整体压低,避免平放正对光时正面过曝发白)
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const key = new THREE.DirectionalLight(0xffffff, 0.72);
+  key.position.set(3.5, 9, 4);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.camera.near = 0.5; key.shadow.camera.far = 40;
+  key.shadow.camera.left = -5; key.shadow.camera.right = 5;
+  key.shadow.camera.top = 5;  key.shadow.camera.bottom = -5;
+  key.shadow.bias = -0.0004;
+  scene.add(key);
+  const rim = new THREE.DirectionalLight(0xfff2cc, 0.35);
+  rim.position.set(-4, 5, -3);
+  scene.add(rim);
+
+  // 接影地面(不可见,仅显示阴影)
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(60, 60),
+    new THREE.ShadowMaterial({ opacity: 0.26 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // 硬币:pivot(绕 Y 自转 + 跳起) > coin(绕 X 翻转) > 边 + 两个字面
+  const pivot = new THREE.Group();
+  const coin  = new THREE.Group();
+  pivot.add(coin);
+  scene.add(pivot);
+
+  // ---- 几何:参考任天堂金币 —— 车削出圆润厚边,亮金卡通质感 ----
+  const HT     = T / 2;              // 半厚
+  const FACE_R = 1 - HT - 0.02;      // 字面半径(留出圆润边)
+
+  // 截面:顶面中心 → 半圆润边(过最宽处 R) → 底面中心,绕 Y 车削
+  function coinProfile(R, ht, seg) {
+    const p = [ new THREE.Vector2(0, ht) ];
+    for (let i = 0; i <= seg; i++) {
+      const a = Math.PI / 2 - Math.PI * (i / seg);   // +90° → -90°
+      p.push(new THREE.Vector2(R - ht + ht * Math.cos(a), ht * Math.sin(a)));
+    }
+    p.push(new THREE.Vector2(0, -ht));
+    return p;
+  }
+
+  // 卡通金:压低高光(specular 变暗、shininess 变小)→ 扁平少反光,更卡通
+  const bodyMat = new THREE.MeshPhongMaterial({ color: 0xf9be1b, specular: 0x8a6a1a, shininess: 42, emissive: 0x3a2700 });
+  const body = new THREE.Mesh(new THREE.LatheGeometry(coinProfile(1, HT, 16), 96), bodyMat);
+  body.castShadow = true;
+  coin.add(body);
+
+  function makeFaceTexture(text) {
+    const s = 512, c = document.createElement('canvas'), g = c.getContext('2d');
+    c.width = c.height = s; const cx = s / 2;
+    // 卡通金盘:干净饱和的径向(少段、明亮)
+    const rad = g.createRadialGradient(cx, cx * 0.82, s * 0.08, cx, cx, s * 0.52);
+    rad.addColorStop(0, '#ffe873'); rad.addColorStop(.65, '#ffc636'); rad.addColorStop(1, '#f4a81c');
+    g.fillStyle = rad; g.beginPath(); g.arc(cx, cx, s / 2, 0, Math.PI * 2); g.fill();
+    // 卡通硬币内圈:一条干净利落的深金实线 + 内侧细高光(清爽,不写实)
+    g.lineCap = 'round';
+    g.strokeStyle = '#cf860f'; g.lineWidth = s * 0.028;
+    g.beginPath(); g.arc(cx, cx, s * 0.43, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = 'rgba(255,247,205,.85)'; g.lineWidth = s * 0.012;
+    g.beginPath(); g.arc(cx, cx, s * 0.405, 0, Math.PI * 2); g.stroke();
+    // 卡通描边文字:粗圆角深金描边 + 明亮金渐变填充 + 顶部高光带
+    g.font = `900 ${s * 0.30}px system-ui, "Arial Black", "Segoe UI", sans-serif`;
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+    g.lineWidth = s * 0.062; g.strokeStyle = '#844e07'; g.strokeText(text, cx, cx);
+    const tg = g.createLinearGradient(0, cx - s * 0.17, 0, cx + s * 0.17);
+    tg.addColorStop(0, '#fff0a2'); tg.addColorStop(.55, '#ffd23e'); tg.addColorStop(1, '#f2ab1c');
+    g.fillStyle = tg; g.fillText(text, cx, cx);
+    g.save();
+    g.beginPath(); g.rect(0, cx - s * 0.18, s, s * 0.12); g.clip();
+    g.fillStyle = 'rgba(255,255,255,.5)'; g.fillText(text, cx, cx);
+    g.restore();
+    const tex = new THREE.CanvasTexture(c);
+    tex.anisotropy = maxAniso; tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
+
+  function makeFace(text, up) {
+    // 低强度 + 高光泽 → 平放时只留一点小反光,不再一片白
+    // polygonOffset(负向)让字面圆盘在深度上稳定压过币体顶面,消除边缘圈 z-fighting 斑点
+    const mat = new THREE.MeshPhongMaterial({
+      map: makeFaceTexture(text), specular: 0x2a2008, shininess: 90,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    });
+    const mesh = new THREE.Mesh(new THREE.CircleGeometry(FACE_R, 96), mat);
+    mesh.position.y = up ? (HT + 0.002) : -(HT + 0.002);
+    mesh.rotation.x = up ? -Math.PI / 2 : Math.PI / 2;   // 正面朝上 / 反面朝下
+    coin.add(mesh);
+  }
+  makeFace('YES', true);    // 正面(flip=0 时朝上)
+  makeFace('NO',  false);   // 反面(flip=π 时朝上)
+
+  function placeCamera() {
+    // 下限 0.001rad(≈0.06°):俯视角=0 时相机正对下方,视线与 up 平行会使 lookAt 退化,故留极小夹角
+    const th = Math.max(cfg.tiltDeg * Math.PI / 180, 0.001);
+    camera.position.set(0, TARGET_Y + CAM_D * Math.cos(th), CAM_D * Math.sin(th));
+    camera.lookAt(0, TARGET_Y, 0);
+  }
+
+  // ---------- 尺寸 ----------
+  function applySize() {
+    cfg.W = clampInt(document.getElementById('w').value, 64, 1920, 360);
+    cfg.H = clampInt(document.getElementById('h').value, 64, 1920, 360);
+    document.getElementById('w').value = cfg.W;
+    document.getElementById('h').value = cfg.H;
+    camera.aspect = cfg.W / cfg.H;
+    camera.updateProjectionMatrix();
+    renderer.setSize(cfg.W, cfg.H, false);   // 不改 CSS,导出像素精确
+    fitDisplay();
+  }
+  function fitDisplay() {
+    const box = Math.min(window.innerWidth - 340, window.innerHeight - 40) * 0.94;
+    const s = Math.max(0.2, Math.min(box / Math.max(cfg.W, cfg.H), 2.4));
+    cv.style.width  = (cfg.W * s) + 'px';
+    cv.style.height = (cfg.H * s) + 'px';
+  }
+  function clampInt(v, lo, hi, dflt) {
+    v = Math.round(+v); if (!isFinite(v)) v = dflt;
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  // ---------- 抛掷 ----------
+  function toss() { if (!anim && !recording) startToss(); }
+  function startToss() {
+    const result = Math.random() < 0.5 ? 'YES' : 'NO';
+    // 半圈数偶=正面(YES)朝上,奇=反面(NO)。以 rest.flip 起点对齐:
+    let half = cfg.halfSpins;
+    const wantEven = (result === 'YES');
+    const endEven = ((Math.round(rest.flip / Math.PI) + half) % 2 === 0);
+    if (endEven !== wantEven) half += 1;
+
+    const flip = rest.flip + half * Math.PI;
+    const spin = rest.spin + (Math.random() < .5 ? 1 : -1) * (1 + Math.floor(Math.random() * 2)) * 2 * Math.PI;
+
+    // 由“靠近程度”倍率反解跳起高度(透视放大 ≈ D/(D - jump·cosθ))
+    const z = Math.max(1.05, cfg.zoom);
+    const th = cfg.tiltDeg * Math.PI / 180;
+    const jump = CAM_D * (1 - 1 / z) / Math.max(0.2, Math.cos(th));
+
+    anim = { start: performance.now(), dur: cfg.dur, flip, spin, jump, result };
+    setResult('flipping');
+  }
+
+  function setResult(state) {
+    const el = document.getElementById('result');
+    if (state === 'flipping') { el.innerHTML = '<span class="rec-dot" style="background:#f4b400"></span>翻转中…'; return; }
+    if (state === 'idle') { el.textContent = '尚未抛掷'; return; }
+    const cls = state === 'YES' ? 'yes' : 'no';
+    el.innerHTML = `结果:<b class="${cls}">${state}</b>`;
+  }
+
+  // ---------- 主循环 ----------
+  function frame(now) {
+    requestAnimationFrame(frame);
+
+    let posY = REST_Y, flipA = rest.flip, spinA = rest.spin;
+    if (anim) {
+      const elapsed = now - anim.start;
+      if (elapsed <= anim.dur) {
+        // 飞行:大抛物线 + 翻转 + 自转
+        const t = Math.min(1, elapsed / anim.dur);
+        const hh = 4 * t * (1 - t);                  // 抛物线 0→1→0
+        posY  = REST_Y + anim.jump * hh;
+        flipA = rest.flip + (anim.flip - rest.flip) * easeOutCubic(t);
+        spinA = rest.spin + (anim.spin - rest.spin) * easeInOutCubic(t);
+      } else {
+        // 落地回弹:姿态已定,仅做递减小跳
+        flipA = anim.flip; spinA = anim.spin;
+        const b = (elapsed - anim.dur) / BOUNCE_DUR;
+        if (b >= 1) {
+          rest.flip = anim.flip; rest.spin = anim.spin;
+          const r = anim.result; anim = null;
+          setResult(r);                              // posY 保持 REST_Y
+        } else {
+          posY = REST_Y + BOUNCE_AMP * (1 - b) * Math.abs(Math.sin(Math.PI * b * BOUNCE_N));
+        }
+      }
+    }
+
+    pivot.position.y = posY;
+    pivot.rotation.y = spinA;
+    coin.rotation.x  = flipA;
+    renderer.render(scene, camera);
+  }
+
+  // ---------- 视频导出 ----------
+  function pickMime() {
+    const list = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+    for (const t of list) if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+    return '';
+  }
+  function exportVideo() {
+    if (anim || recording) return;
+    if (!window.MediaRecorder || !cv.captureStream) {
+      alert('当前浏览器不支持 MediaRecorder 录制,请用 Chrome / Edge。'); return;
+    }
+    const mime = pickMime();
+    const stream = cv.captureStream(cfg.fps);
+    const chunks = [];
+    let rec;
+    try {
+      rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8_000_000 } : undefined);
+    } catch (e) { alert('无法创建录制器:' + e.message); return; }
+
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      const type = (mime || 'video/webm').split(';')[0];
+      const ext  = type.includes('mp4') ? 'mp4' : 'webm';
+      const blob = new Blob(chunks, { type });
+      const url  = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `coin-flip-${cfg.W}x${cfg.H}.${ext}`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      recording = false; setControls(true); recBtnLabel('导出视频');
+    };
+
+    recording = true; setControls(false); recBtnLabel('<span class="rec-dot"></span>录制中…');
+    const hold = 800;                 // 落地后额外展示结果的时长
+    startToss();                      // 起跳与录制同时开始 → 首帧即腾空,不含抛掷前静态帧
+    rec.start();
+    setTimeout(() => { try { rec.stop(); } catch (_) {} }, cfg.dur + BOUNCE_DUR + hold);
+  }
+  function recBtnLabel(html) { document.querySelector('#recBtn .row-lbl').innerHTML = html; }
+  function setControls(on) {
+    ['flipBtn', 'recBtn', 'imgBtn', 'w', 'h', 'dur', 'spins', 'zoom', 'tilt', 'fps']
+      .forEach(id => document.getElementById(id).disabled = !on);
+  }
+
+  // ---------- 导出图片(按分辨率导出静态落地帧 PNG) ----------
+  function exportImage() {
+    if (anim || recording) return;                 // 动画/录制中不导出
+    renderer.render(scene, camera);                // 确保后备缓冲 = 当前静态落地帧(尺寸即 cfg.W×H)
+    const save = (url, revoke) => {
+      const a = document.createElement('a');
+      a.href = url; a.download = `coin-flip-${cfg.W}x${cfg.H}.png`; a.click();
+      if (revoke) setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    if (cv.toBlob) {
+      cv.toBlob(b => b ? save(URL.createObjectURL(b), true) : alert('导出图片失败'), 'image/png');
+    } else {
+      save(cv.toDataURL('image/png'), false);
+    }
+  }
+
+  // ---------- 事件 ----------
+  cv.addEventListener('click', toss);
+  document.getElementById('flipBtn').addEventListener('click', toss);
+  document.getElementById('recBtn').addEventListener('click', exportVideo);
+  document.getElementById('imgBtn').addEventListener('click', exportImage);
+  window.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); toss(); } });
+
+  document.getElementById('w').addEventListener('change', applySize);
+  document.getElementById('h').addEventListener('change', applySize);
+  document.querySelectorAll('.presets button').forEach(b => {
+    b.addEventListener('click', () => {
+      const [w, h] = b.dataset.res.split(',');
+      document.getElementById('w').value = w; document.getElementById('h').value = h;
+      applySize();
+    });
+  });
+
+  const bind = (id, valId, fmt, set) => {
+    const el = document.getElementById(id), out = document.getElementById(valId);
+    const upd = () => { set(+el.value); out.textContent = fmt(+el.value); };
+    el.addEventListener('input', upd); upd();
+  };
+  bind('dur',   'durVal',   v => (v / 1000).toFixed(1) + 's', v => cfg.dur = v);
+  bind('spins', 'spinsVal', v => String(v),                   v => cfg.halfSpins = v);
+  bind('zoom',  'zoomVal',  v => (v / 100).toFixed(1) + '×',  v => cfg.zoom = v / 100);
+  bind('tilt',  'tiltVal',  v => v + '°',                     v => { cfg.tiltDeg = v; placeCamera(); });
+  document.getElementById('fps').addEventListener('change', e => cfg.fps = +e.target.value);
+  window.addEventListener('resize', fitDisplay);
+
+  // ---------- 启动 ----------
+  placeCamera();
+  applySize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
