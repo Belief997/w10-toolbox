@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera Dump 预览 · RGB565 / YUV422 / RAW / JPEG</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #e8ecf2; background: #14171c; overflow: hidden;
+    display: flex; font-size: 13px;
+  }
+
+  /* ---------------- 左:画布舞台 ---------------- */
+  #stage {
+    flex: 1; min-width: 0; height: 100%; position: relative;
+    background:
+      linear-gradient(45deg, #1b1f26 25%, transparent 25%, transparent 75%, #1b1f26 75%) 0 0 / 24px 24px,
+      linear-gradient(45deg, #1b1f26 25%, transparent 25%, transparent 75%, #1b1f26 75%) 12px 12px / 24px 24px,
+      #191d23;
+    overflow: hidden; cursor: grab;
+  }
+  #stage.dragging { cursor: grabbing; }
+  #stage.empty::after {
+    content: "把 dump 文件拖进来,或点右侧「选择文件」";
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #5a6578; font-size: 15px; pointer-events: none;
+  }
+  #stage.dropping { outline: 2px dashed #5aa9ff; outline-offset: -8px; background-color: #1d2633; }
+
+  #cv {
+    position: absolute; left: 0; top: 0; transform-origin: 0 0;
+    image-rendering: pixelated;
+    box-shadow: 0 8px 40px rgba(0,0,0,.55);
+  }
+  /* 放大镜:跟随鼠标,显示原始像素 */
+  #loupe {
+    position: absolute; width: 132px; height: 132px; pointer-events: none; display: none;
+    border: 1px solid #5aa9ff; border-radius: 4px; background: #0d1014;
+    box-shadow: 0 6px 24px rgba(0,0,0,.6); z-index: 5;
+  }
+  #loupe canvas { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
+
+  /* 左下角状态条 */
+  #hud {
+    position: absolute; left: 10px; bottom: 10px; z-index: 6;
+    background: rgba(12,15,20,.86); border: 1px solid #2b323d; border-radius: 6px;
+    padding: 6px 10px; font: 12px/1.5 ui-monospace, Consolas, monospace;
+    color: #b8c4d4; pointer-events: none; white-space: pre;
+  }
+  #hud b { color: #7fd1ff; font-weight: 600; }
+  #hud .sw {
+    display: inline-block; width: 10px; height: 10px; vertical-align: -1px;
+    border: 1px solid #555; margin-right: 4px;
+  }
+  /* 右下角缩放按钮 */
+  #zoombar {
+    position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; gap: 4px;
+  }
+  #zoombar button {
+    background: rgba(12,15,20,.86); color: #cbd5e3; border: 1px solid #2b323d;
+    border-radius: 5px; padding: 4px 9px; cursor: pointer; font-size: 12px;
+  }
+  #zoombar button:hover { background: #222a35; color: #fff; }
+
+  /* ---------------- 右:控制面板 ---------------- */
+  #panel {
+    width: 330px; flex: none; height: 100%; overflow-y: auto;
+    background: #1b1f26; border-left: 1px solid #2b323d; padding: 12px 14px 40px;
+  }
+  #panel h1 { font-size: 14px; margin: 0 0 4px; color: #fff; }
+  #panel .sub { color: #7e8b9e; font-size: 11px; margin-bottom: 12px; line-height: 1.5; }
+
+  fieldset {
+    border: 1px solid #2b323d; border-radius: 7px; margin: 0 0 11px; padding: 9px 11px 11px;
+  }
+  legend { color: #8fa3bd; font-size: 11px; padding: 0 5px; letter-spacing: .4px; }
+
+  label.row {
+    display: flex; align-items: center; gap: 7px; margin: 6px 0; line-height: 1.5;
+  }
+  label.row > span:first-child { flex: none; width: 66px; color: #9aa7b8; font-size: 12px; }
+  label.row.wide > span:first-child { width: 86px; }
+
+  select, input[type=text], input[type=number] {
+    flex: 1; min-width: 0; background: #12161b; color: #e8ecf2;
+    border: 1px solid #333c49; border-radius: 5px; padding: 4px 6px; font-size: 12px;
+    font-family: inherit;
+  }
+  input[type=number] { font-family: ui-monospace, Consolas, monospace; }
+  select:focus, input:focus { outline: none; border-color: #4b7fc4; }
+  input[type=range] { flex: 1; min-width: 0; accent-color: #5aa9ff; }
+  input[type=checkbox] { accent-color: #5aa9ff; }
+
+  button.act {
+    width: 100%; background: #2a3a52; color: #dce7f5;
+    border: 1px solid #3c5578; border-radius: 6px; padding: 7px; cursor: pointer;
+    font-size: 12.5px; font-family: inherit; margin-top: 3px;
+  }
+  button.act:hover { background: #35496a; color: #fff; }
+  button.act:disabled { opacity: .45; cursor: default; }
+  button.mini {
+    background: #232a34; color: #b9c5d4; border: 1px solid #333c49; border-radius: 5px;
+    padding: 3px 7px; font-size: 11px; cursor: pointer; font-family: inherit; flex: none;
+  }
+  button.mini:hover { background: #2d3644; color: #fff; }
+  button.mini.on { background: #2a4a72; border-color: #4b7fc4; color: #fff; }
+
+  .btnrow { display: flex; gap: 5px; margin-top: 6px; flex-wrap: wrap; }
+  .hint { color: #6f7d90; font-size: 11px; line-height: 1.5; margin: 5px 0 0; }
+  .warn { color: #ffb86b; }
+  .err  { color: #ff7a7a; }
+  .ok   { color: #7fd48c; }
+
+  /* 尺寸候选列表 */
+  #guesses { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  #guesses button { font-family: ui-monospace, Consolas, monospace; }
+  #sizeInfo { margin-top: 7px; font: 11.5px/1.6 ui-monospace, Consolas, monospace; color: #8b97a8; }
+
+  /* 通道/直方图 */
+  #histo { width: 100%; height: 62px; display: block; background: #0f1318;
+           border: 1px solid #2b323d; border-radius: 5px; margin-top: 6px; }
+  .knobs.hide { display: none; }
+
+  /* 文件列表(多文件 / 序列) */
+  #fileList { max-height: 132px; overflow-y: auto; margin-top: 6px; }
+  #fileList div {
+    padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 11.5px;
+    font-family: ui-monospace, Consolas, monospace; color: #9aa7b8;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #fileList div:hover { background: #232a34; }
+  #fileList div.cur { background: #2a4a72; color: #fff; }
+</style>
+</head>
+<body>
+
+<div id="stage" class="empty">
+  <canvas id="cv"></canvas>
+  <div id="loupe"><canvas width="33" height="33"></canvas></div>
+  <div id="hud"></div>
+  <div id="zoombar">
+    <button data-z="out">−</button>
+    <button data-z="fit">适应</button>
+    <button data-z="1">1:1</button>
+    <button data-z="in">+</button>
+  </div>
+</div>
+
+<div id="panel">
+  <h1>Camera Dump 预览</h1>
+  <div class="sub">把 camera 模块 dump 出来的裸数据按指定格式/尺寸还原成图像。
+    纯本地运行,文件不会上传。</div>
+
+  <fieldset>
+    <legend>文件</legend>
+    <input type="file" id="file" multiple style="display:none">
+    <button class="act" id="pick">选择文件…</button>
+    <div class="hint" id="fileInfo">未选择文件</div>
+    <div id="fileList"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>格式</legend>
+    <label class="row"><span>格式</span><select id="fmt"></select></label>
+    <div class="hint" id="fmtHint"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>尺寸</legend>
+    <label class="row"><span>预设</span><select id="preset"></select></label>
+    <label class="row"><span>宽 × 高</span>
+      <input type="number" id="w" min="1" max="16384" step="1" value="640">
+      <input type="number" id="h" min="1" max="16384" step="1" value="480">
+    </label>
+    <label class="row"><span>行跨距</span>
+      <input type="number" id="stride" min="0" max="131072" step="1" value="0" placeholder="0 = 紧凑">
+      <button class="mini" id="alignBtn" title="按常见对齐值向上取整">对齐</button>
+    </label>
+    <div class="btnrow">
+      <button class="mini" id="guessBtn">按文件大小推断</button>
+      <button class="mini" id="swapWH">宽高互换</button>
+    </div>
+    <div id="guesses"></div>
+    <div id="sizeInfo"></div>
+  </fieldset>
+
+  <fieldset class="knobs" id="knobYUV">
+    <legend>YUV 参数</legend>
+    <label class="row"><span>量化范围</span>
+      <select id="range">
+        <option value="limited">limited / video (16–235)</option>
+        <option value="full">full / JPEG (0–255)</option>
+      </select></label>
+    <label class="row"><span>转换矩阵</span><select id="matrix"></select></label>
+  </fieldset>
+
+  <fieldset class="knobs" id="knobRAW">
+    <legend>RAW 参数</legend>
+    <label class="row"><span>CFA 排列</span><select id="cfa"></select></label>
+    <label class="row wide"><span>黑电平</span>
+      <input type="number" id="blackLevel" value="0" min="0" max="65535">
+      <label style="flex:none;display:flex;gap:4px;align-items:center;color:#9aa7b8">
+        <input type="checkbox" id="autoLevel" checked>自动
+      </label>
+    </label>
+    <label class="row wide"><span>白电平</span>
+      <input type="number" id="whiteLevel" value="0" min="1" max="65535"></label>
+    <label class="row wide"><span>Gamma <b id="gammaV">2.20</b></span>
+      <input type="range" id="gamma" min="1" max="3" step="0.05" value="2.2"></label>
+    <label class="row wide"><span>R 增益 <b id="gainRV">1.00</b></span>
+      <input type="range" id="gainR" min="0.3" max="3" step="0.01" value="1"></label>
+    <label class="row wide"><span>G 增益 <b id="gainGV">1.00</b></span>
+      <input type="range" id="gainG" min="0.3" max="3" step="0.01" value="1"></label>
+    <label class="row wide"><span>B 增益 <b id="gainBV">1.00</b></span>
+      <input type="range" id="gainB" min="0.3" max="3" step="0.01" value="1"></label>
+    <div class="btnrow">
+      <button class="mini" id="awb">灰世界白平衡</button>
+      <button class="mini" id="resetRaw">复位</button>
+    </div>
+  </fieldset>
+
+  <fieldset class="knobs" id="knobByte">
+    <legend>字节序 / 对齐</legend>
+    <label class="row wide" id="rowEndian">
+      <span>字节序</span>
+      <select id="endian">
+        <option value="le">小端 little-endian</option>
+        <option value="be">大端 big-endian</option>
+      </select></label>
+    <label class="row wide" id="rowMsb">
+      <span>16bit 对齐</span>
+      <select id="msb">
+        <option value="lsb">LSB 对齐(低位)</option>
+        <option value="msb">MSB 对齐(高位)</option>
+      </select></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>显示</legend>
+    <label class="row wide"><span>数据偏移</span>
+      <input type="number" id="offset" value="0" min="0" step="1"></label>
+    <div class="btnrow">
+      <button class="mini" id="chAll">RGB</button>
+      <button class="mini" id="chR">R</button>
+      <button class="mini" id="chG">G</button>
+      <button class="mini" id="chB">B</button>
+      <button class="mini" id="chY">灰度</button>
+    </div>
+    <div class="btnrow">
+      <button class="mini" id="flipH">水平翻转</button>
+      <button class="mini" id="flipV">垂直翻转</button>
+      <button class="mini" id="gridBtn">像素网格</button>
+      <button class="mini" id="loupeBtn">放大镜</button>
+    </div>
+    <canvas id="histo" width="300" height="62"></canvas>
+    <div class="hint" id="statInfo"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>导出</legend>
+    <div class="btnrow">
+      <button class="mini" id="savePng">保存 PNG</button>
+      <button class="mini" id="copyImg">复制到剪贴板</button>
+    </div>
+    <div class="hint" id="exportHint"></div>
+  </fieldset>
+
+  <div class="hint">
+    快捷键:<b>滚轮</b> 缩放 · <b>拖拽</b> 平移 · <b>F</b> 适应 · <b>1</b> 原始比例 ·
+    <b>Z</b> 放大镜 · <b>G</b> 网格 · <b>[ ]</b> 切上/下一个文件
+  </div>
+</div>
+
+<script src="decoders.js"></script>
+<script src="camera-preview.js"></script>
+</body>
+</html>

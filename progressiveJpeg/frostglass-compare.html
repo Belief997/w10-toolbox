@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双表法毛玻璃 vs 真高斯 · 对比</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #eceef4; overflow: hidden; user-select: none;
+    background: #16171c;
+    display: flex;
+  }
+
+  /* ---- 舞台 ---- */
+  #stage {
+    flex: 1; min-width: 0; height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 20px; overflow: auto;
+    background: radial-gradient(120% 120% at 50% 35%, #23252d 0%, #191a20 65%, #131419 100%);
+  }
+  #panes { display: flex; gap: 18px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+  .pane { display: flex; flex-direction: column; gap: 8px; }
+  .pane canvas {
+    display: block; border-radius: 10px; background: #0e0f13;
+    box-shadow: 0 18px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.07);
+  }
+  .pane .cap { font-size: 13px; font-weight: 600; }
+  .pane .sub {
+    font-size: 11.5px; opacity: .55; font-family: ui-monospace, Consolas, monospace;
+    min-height: 15px;
+  }
+  .pane .cap .tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 5px; margin-right: 7px; vertical-align: 1px;
+  }
+  .tag.a { background: rgba(96,165,250,.2); color: #93c5fd; }
+  .tag.b { background: rgba(251,191,36,.2); color: #fcd34d; }
+
+  /* 分屏拖动 */
+  #splitWrap { position: relative; cursor: ew-resize; touch-action: none; }
+  #splitLine {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,.85);
+    box-shadow: 0 0 10px rgba(0,0,0,.7); pointer-events: none;
+  }
+  #splitLine::after {
+    content: ""; position: absolute; left: 50%; top: 50%;
+    width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+    background: rgba(255,255,255,.9); box-shadow: 0 2px 10px rgba(0,0,0,.5);
+  }
+
+  #hint { font-size: 12px; opacity: .4; text-align: center; line-height: 1.9; }
+  #hint kbd {
+    background: rgba(255,255,255,.1); border-radius: 4px; padding: 1px 5px;
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+  }
+  #busy {
+    font-size: 11.5px; opacity: 0; transition: opacity .15s;
+    font-family: ui-monospace, Consolas, monospace; color: #fcd34d; height: 14px;
+  }
+  #busy.on { opacity: .8; }
+
+  /* ---- 右侧面板 ---- */
+  #panel {
+    width: 340px; flex: 0 0 340px; height: 100%;
+    background: rgba(30,32,39,.92); backdrop-filter: blur(14px);
+    border-left: 1px solid rgba(255,255,255,.08);
+    padding: 20px 18px; overflow-y: auto;
+    box-shadow: -8px 0 30px rgba(0,0,0,.3);
+  }
+  #panel h1 { font-size: 15px; margin: 0 0 4px; font-weight: 700; letter-spacing: .02em; }
+  #panel .sub { font-size: 12px; opacity: .5; margin: 0 0 18px; line-height: 1.5; }
+
+  .group { margin: 0 0 20px; }
+  .group > .gt {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    opacity: .4; margin: 0 0 9px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
+  .row label { font-size: 13px; opacity: .8; white-space: nowrap; flex: 0 0 auto; }
+  .row .val {
+    margin-left: auto; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px; opacity: .75; min-width: 52px; text-align: right;
+  }
+  input[type=range] { flex: 1; min-width: 0; accent-color: #fcd34d; }
+  select {
+    flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid rgba(255,255,255,.16);
+    border-radius: 8px; background: #23252d; color: inherit;
+  }
+  label.chk { display: flex; align-items: center; gap: 8px; font-size: 13px; opacity: .85; cursor: pointer; }
+  label.chk input { accent-color: #fcd34d; }
+
+  button.primary {
+    width: 100%; padding: 11px; margin-top: 4px; font-size: 14px; font-weight: 600;
+    border: none; border-radius: 11px; cursor: pointer; color: #3a2c00;
+    background: linear-gradient(180deg, #ffd24d, #f4b400);
+    box-shadow: 0 6px 18px rgba(244,180,0,.28);
+  }
+  button.primary:hover { filter: brightness(1.05); }
+
+  table.m { width: 100%; border-collapse: collapse; font-size: 11.5px; font-family: ui-monospace, Consolas, monospace; }
+  table.m th, table.m td { padding: 4px 3px; text-align: right; }
+  table.m th { opacity: .4; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,.1); }
+  table.m td:first-child, table.m th:first-child { text-align: left; }
+  table.m tr.hl td { color: #fcd34d; }
+
+  #presetList .p {
+    display: flex; gap: 8px; align-items: baseline; padding: 6px 7px; border-radius: 6px;
+    font-size: 11.5px; cursor: pointer; font-family: ui-monospace, Consolas, monospace;
+  }
+  #presetList .p:hover { background: rgba(255,255,255,.05); }
+  #presetList .p.on { background: rgba(252,211,77,.14); color: #fcd34d; }
+  #presetList .p .k { flex: 0 0 62px; opacity: .75; }
+  #presetList .p .d { flex: 1; min-width: 0; font-family: system-ui, sans-serif; }
+  #presetList .p .s { opacity: .6; }
+
+  .note {
+    font-size: 11.5px; line-height: 1.6; opacity: .5; margin: 10px 0 0;
+    padding-left: 10px; border-left: 2px solid rgba(255,255,255,.12);
+  }
+  #err {
+    margin: 40px auto; max-width: 620px; padding: 22px 26px; line-height: 1.75;
+    background: rgba(220,60,60,.1); border: 1px solid rgba(220,60,60,.35);
+    border-radius: 12px; font-size: 13.5px; display: none;
+  }
+  #err code {
+    background: rgba(0,0,0,.4); padding: 2px 6px; border-radius: 5px;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="err"></div>
+  <div id="panes">
+    <div class="pane" id="paneA">
+      <canvas id="cvA"></canvas>
+      <div class="cap"><span class="tag a">A</span><span id="capA">双表法</span></div>
+      <div class="sub" id="subA"></div>
+    </div>
+    <div class="pane" id="paneB">
+      <canvas id="cvB"></canvas>
+      <div class="cap"><span class="tag b">B</span><span id="capB">真高斯</span></div>
+      <div class="sub" id="subB"></div>
+    </div>
+  </div>
+
+  <div id="splitWrap" style="display:none">
+    <canvas id="cvS"></canvas>
+    <div id="splitLine"></div>
+  </div>
+
+  <div id="busy"></div>
+  <div id="hint">
+    <kbd>←</kbd><kbd>→</kbd> 切档位 &nbsp;·&nbsp; <kbd>空格</kbd> 按住看原图 &nbsp;·&nbsp;
+    <kbd>S</kbd> 分屏 &nbsp;·&nbsp; <kbd>D</kbd> 差异图 &nbsp;·&nbsp; <kbd>B</kbd> 呼吸感动画
+  </div>
+</div>
+
+<div id="panel">
+  <h1>双表法毛玻璃</h1>
+  <p class="sub">
+    JPEG <code>scale=1/8</code> 解码当降采样器,σ 从采样几何里免费长出来。
+    左边是双表法,右边是同 σ 的真高斯 —— 后者需要全部像素在手。
+  </p>
+
+  <div class="group">
+    <div class="gt">档位</div>
+    <div id="presetList"></div>
+    <div class="row">
+      <label>box 窗宽 w</label>
+      <input type="range" id="rw" min="1" max="15" step="2" value="1">
+      <span class="val" id="vw">1</span>
+    </div>
+    <div class="row">
+      <label>迭代次数 n</label>
+      <input type="range" id="rn" min="0" max="8" step="1" value="0">
+      <span class="val" id="vn">0</span>
+    </div>
+    <p class="note" id="sigNote"></p>
+  </div>
+
+  <div class="group">
+    <div class="gt">对照高斯 σ</div>
+    <div class="row">
+      <label>σ</label>
+      <input type="range" id="rs" min="1" max="40" step="0.1" value="5.5">
+      <span class="val" id="vs">5.5</span>
+    </div>
+    <label class="chk"><input type="checkbox" id="autoSig" checked> 自动取最匹配的 σ</label>
+    <p class="note">
+      自动模式会搜出与左图 PSNR 最高的真高斯 σ —— 这个数比公式值高
+      0.6~1.5,因为公式漏了双线性上采样的贡献。
+    </p>
+  </div>
+
+  <div class="group">
+    <div class="gt">显示</div>
+    <div class="row">
+      <label>布局</label>
+      <select id="layout">
+        <option value="side">并排</option>
+        <option value="split">分屏拖动</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>缩放</label>
+      <input type="range" id="rz" min="0.5" max="2" step="0.05" value="1">
+      <span class="val" id="vz">1.00x</span>
+    </div>
+    <label class="chk"><input type="checkbox" id="diff"> 差异热力图(vs 原图)</label>
+    <label class="chk"><input type="checkbox" id="nearest"> 小图用最近邻放大(看真实分辨率)</label>
+    <label class="chk"><input type="checkbox" id="breathe"> 呼吸感动画(平移 0~7 px)</label>
+  </div>
+
+  <div class="group">
+    <div class="gt">指标</div>
+    <table class="m">
+      <thead><tr><th>对比</th><th>PSNR</th><th>SSIM</th></tr></thead>
+      <tbody id="mtb"></tbody>
+    </table>
+    <p class="note" id="costNote"></p>
+  </div>
+
+  <div class="group">
+    <div class="gt">码流</div>
+    <table class="m"><tbody id="btb"></tbody></table>
+  </div>
+
+  <button class="primary" id="exp">导出三联对比 PNG</button>
+</div>
+
+<script src="out_frost/data.js" onerror="window.__fgLoadErr=1"></script>
+<script>
+(() => {
+  'use strict';
+
+  const $ = id => document.getElementById(id);
+  const D = window.FG_DATA;
+
+  if (!D || window.__fgLoadErr) {
+    $('err').style.display = 'block';
+    $('err').innerHTML =
+      '<b>没找到 <code>out_frost/data.js</code></b><br>' +
+      '先在本目录跑一次生成脚本:<br><br>' +
+      '<code>python make_frostglass.py</code><br><br>' +
+      '它会产出 <code>out_frost/data.js</code>(图片已 base64 内联,' +
+      '所以 <code>file://</code> 直接双击本页也能读 canvas 像素,无需起服务器)。<br><br>' +
+      '1/8 小图必须由 Python 带过来 —— 浏览器没有 libjpeg 的 <code>draft()</code> 缩放解码。';
+    $('panes').style.display = 'none';
+    $('splitWrap').style.display = 'none';
+    $('hint').style.display = 'none';
+    $('panel').style.display = 'none';
+    return;
+  }
+
+  const META = D.meta, ENC = META.encode;
+  const W = D.width, H = D.height;
+  const SW = D.smallW, SH = D.smallH;
+
+  // ---------- 状态 ----------
+  const st = {
+    w: 1, n: 0, sigma: 5.5, autoSig: true,
+    layout: 'side', zoom: 1, diff: false, nearest: false,
+    peek: false, breathe: false, splitAt: 0.5,
+  };
+
+  let origData = null;       // ImageData 原图
+  let smallData = null;      // ImageData 59x59 小图(Python 带来的)
+  let shiftFrames = [];      // 8 张平移小图,呼吸感动画用
+  let breatheTimer = null, breathePhase = 0;
+
+  const off = (w, h) => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    return c;
+  };
+
+  const loadDataURL = (mime, b64) => new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = `data:${mime};base64,${b64}`;
+  });
+
+  function imageDataOf(img, w, h) {
+    const c = off(w, h), x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(img, 0, 0, w, h);
+    return x.getImageData(0, 0, w, h);
+  }
+
+  // ---------- 管线:box 迭代 + 双线性上采样 ----------
+
+  /* 在小图上叠 n 趟 w x w box。可分离,和 Python 的 uniform_filter(mode='nearest')
+     同口径 —— 边缘夹取而不是补零,否则四周会发暗。 */
+  function boxIter(src, sw, sh, w, n) {
+    if (w <= 1 || n <= 0) return src;
+    const r = (w - 1) >> 1;
+    let cur = new Float32Array(sw * sh * 3);
+    for (let i = 0, j = 0; i < sw * sh; i++, j += 4) {
+      cur[i * 3] = src.data[j]; cur[i * 3 + 1] = src.data[j + 1]; cur[i * 3 + 2] = src.data[j + 2];
+    }
+    const tmp = new Float32Array(sw * sh * 3);
+    for (let pass = 0; pass < n; pass++) {
+      // 横向
+      for (let y = 0; y < sh; y++) {
+        for (let x = 0; x < sw; x++) {
+          let a = 0, b = 0, c = 0;
+          for (let d = -r; d <= r; d++) {
+            const xx = Math.min(sw - 1, Math.max(0, x + d)), o = (y * sw + xx) * 3;
+            a += cur[o]; b += cur[o + 1]; c += cur[o + 2];
+          }
+          const o = (y * sw + x) * 3;
+          tmp[o] = a / w; tmp[o + 1] = b / w; tmp[o + 2] = c / w;
+        }
+      }
+      // 纵向
+      for (let y = 0; y < sh; y++) {
+        for (let x = 0; x < sw; x++) {
+          let a = 0, b = 0, c = 0;
+          for (let d = -r; d <= r; d++) {
+            const yy = Math.min(sh - 1, Math.max(0, y + d)), o = (yy * sw + x) * 3;
+            a += tmp[o]; b += tmp[o + 1]; c += tmp[o + 2];
+          }
+          const o = (y * sw + x) * 3;
+          cur[o] = a / w; cur[o + 1] = b / w; cur[o + 2] = c / w;
+        }
+      }
+    }
+    const out = new ImageData(sw, sh);
+    for (let i = 0, j = 0; i < sw * sh; i++, j += 4) {
+      out.data[j] = Math.max(0, Math.min(255, Math.round(cur[i * 3])));
+      out.data[j + 1] = Math.max(0, Math.min(255, Math.round(cur[i * 3 + 1])));
+      out.data[j + 2] = Math.max(0, Math.min(255, Math.round(cur[i * 3 + 2])));
+      out.data[j + 3] = 255;
+    }
+    return out;
+  }
+
+  /* 双线性上采样,半像素中心。和 PIL 的 Image.BILINEAR 核对过,最大差 1 灰阶
+     (只有取整差异),所以这里算出的 PSNR / SSIM 和 metrics.json 对得上。 */
+  function bilinear(src, sw, sh, dw, dh) {
+    const s = new Float32Array(sw * sh * 3);
+    for (let i = 0, j = 0; i < sw * sh; i++, j += 4) {
+      s[i * 3] = src.data[j]; s[i * 3 + 1] = src.data[j + 1]; s[i * 3 + 2] = src.data[j + 2];
+    }
+    // 先横向到 dw,再纵向到 dh
+    const tmp = new Float32Array(sh * dw * 3);
+    const xs = new Int32Array(dw * 2), xf = new Float32Array(dw);
+    for (let x = 0; x < dw; x++) {
+      const c = (x + 0.5) * sw / dw - 0.5, x0 = Math.floor(c);
+      xf[x] = c - x0;
+      xs[x * 2] = Math.min(sw - 1, Math.max(0, x0));
+      xs[x * 2 + 1] = Math.min(sw - 1, Math.max(0, x0 + 1));
+    }
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < dw; x++) {
+        const a = (y * sw + xs[x * 2]) * 3, b = (y * sw + xs[x * 2 + 1]) * 3;
+        const t = xf[x], u = 1 - t, o = (y * dw + x) * 3;
+        tmp[o] = s[a] * u + s[b] * t;
+        tmp[o + 1] = s[a + 1] * u + s[b + 1] * t;
+        tmp[o + 2] = s[a + 2] * u + s[b + 2] * t;
+      }
+    }
+    const out = new ImageData(dw, dh);
+    for (let y = 0; y < dh; y++) {
+      const c = (y + 0.5) * sh / dh - 0.5, y0 = Math.floor(c), t = c - y0, u = 1 - t;
+      const ya = Math.min(sh - 1, Math.max(0, y0)), yb = Math.min(sh - 1, Math.max(0, y0 + 1));
+      for (let x = 0; x < dw; x++) {
+        const a = (ya * dw + x) * 3, b = (yb * dw + x) * 3, j = (y * dw + x) * 4;
+        out.data[j] = Math.max(0, Math.min(255, Math.round(tmp[a] * u + tmp[b] * t)));
+        out.data[j + 1] = Math.max(0, Math.min(255, Math.round(tmp[a + 1] * u + tmp[b + 1] * t)));
+        out.data[j + 2] = Math.max(0, Math.min(255, Math.round(tmp[a + 2] * u + tmp[b + 2] * t)));
+        out.data[j + 3] = 255;
+      }
+    }
+    return out;
+  }
+
+  /* 最近邻放大,用来看小图的真实分辨率(能数出 8x8 的格子)。 */
+  function nearest(src, sw, sh, dw, dh) {
+    const out = new ImageData(dw, dh);
+    for (let y = 0; y < dh; y++) {
+      const sy = Math.min(sh - 1, (y * sh / dh) | 0);
+      for (let x = 0; x < dw; x++) {
+        const sx = Math.min(sw - 1, (x * sw / dw) | 0);
+        const a = (sy * sw + sx) * 4, j = (y * dw + x) * 4;
+        out.data[j] = src.data[a]; out.data[j + 1] = src.data[a + 1];
+        out.data[j + 2] = src.data[a + 2]; out.data[j + 3] = 255;
+      }
+    }
+    return out;
+  }
+
+  const frostCache = new Map();
+  function frost(w, n, useNearest, smallOverride) {
+    const key = w + '|' + n + '|' + (useNearest ? 'n' : 'b') + '|' + (smallOverride ? 'x' : '');
+    if (!smallOverride && frostCache.has(key)) return frostCache.get(key);
+    const base = smallOverride || smallData;
+    const sw = smallOverride ? SW : SW, sh = smallOverride ? SH : SH;
+    const sm = boxIter(base, sw, sh, w, n);
+    const res = useNearest ? nearest(sm, sw, sh, W, H) : bilinear(sm, sw, sh, W, H);
+    if (!smallOverride) frostCache.set(key, res);
+    return res;
+  }
+
+  // ---------- 真高斯 ----------
+  const blurCache = new Map();
+  function gaussBlur(src, sigma) {
+    const key = Math.round(sigma * 10);
+    if (blurCache.has(key)) return blurCache.get(key);
+    if (sigma <= 0) { blurCache.set(key, src); return src; }
+
+    const rad = Math.max(1, Math.ceil(sigma * 4));
+    const ker = new Float32Array(2 * rad + 1);
+    let sum = 0;
+    for (let i = -rad; i <= rad; i++) {
+      const v = Math.exp(-(i * i) / (2 * sigma * sigma));
+      ker[i + rad] = v; sum += v;
+    }
+    for (let i = 0; i < ker.length; i++) ker[i] /= sum;
+
+    const N = W * H;
+    const tmp = new Float32Array(N * 3), out2 = new Float32Array(N * 3);
+    const sd = src.data;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let r = 0, g = 0, b = 0;
+        for (let t = -rad; t <= rad; t++) {
+          const xx = Math.min(W - 1, Math.max(0, x + t));
+          const i = (y * W + xx) * 4, w = ker[t + rad];
+          r += sd[i] * w; g += sd[i + 1] * w; b += sd[i + 2] * w;
+        }
+        const o = (y * W + x) * 3;
+        tmp[o] = r; tmp[o + 1] = g; tmp[o + 2] = b;
+      }
+    }
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let r = 0, g = 0, b = 0;
+        for (let t = -rad; t <= rad; t++) {
+          const yy = Math.min(H - 1, Math.max(0, y + t));
+          const i = (yy * W + x) * 3, w = ker[t + rad];
+          r += tmp[i] * w; g += tmp[i + 1] * w; b += tmp[i + 2] * w;
+        }
+        const o = (y * W + x) * 3;
+        out2[o] = r; out2[o + 1] = g; out2[o + 2] = b;
+      }
+    }
+    const res = new ImageData(W, H);
+    for (let i = 0, j = 0, k = 0; i < N; i++, j += 4, k += 3) {
+      res.data[j] = Math.max(0, Math.min(255, Math.round(out2[k])));
+      res.data[j + 1] = Math.max(0, Math.min(255, Math.round(out2[k + 1])));
+      res.data[j + 2] = Math.max(0, Math.min(255, Math.round(out2[k + 2])));
+      res.data[j + 3] = 255;
+    }
+    blurCache.set(key, res);
+    return res;
+  }
+
+  // ---------- 指标 ----------
+  function psnr(a, b) {
+    let se = 0;
+    const A = a.data, B = b.data;
+    for (let i = 0; i < A.length; i += 4) {
+      const d0 = A[i] - B[i], d1 = A[i + 1] - B[i + 1], d2 = A[i + 2] - B[i + 2];
+      se += d0 * d0 + d1 * d1 + d2 * d2;
+    }
+    const mse = se / (W * H * 3);
+    return mse === 0 ? Infinity : 10 * Math.log10(255 * 255 / mse);
+  }
+
+  /* 标准 SSIM:11x11 高斯窗 sigma=1.5,逐通道求均值,窗口整体落在图内(裁边 5px)。
+     与 skimage 的 gaussian_weights=True, use_sample_covariance=False 对齐。 */
+  const SS_R = 5, SS_SIG = 1.5;
+  const SS_K = (() => {
+    const k = new Float32Array(11); let s = 0;
+    for (let i = -SS_R; i <= SS_R; i++) { const v = Math.exp(-(i * i) / (2 * SS_SIG * SS_SIG)); k[i + SS_R] = v; s += v; }
+    for (let i = 0; i < 11; i++) k[i] /= s;
+    return k;
+  })();
+
+  function ssim(a, b) {
+    const C1 = 6.5025, C2 = 58.5225;
+    let total = 0;
+    for (let ch = 0; ch < 3; ch++) {
+      const X = new Float32Array(W * H), Y = new Float32Array(W * H);
+      for (let i = 0, j = ch; i < W * H; i++, j += 4) { X[i] = a.data[j]; Y[i] = b.data[j]; }
+      const blur = src => {
+        const t = new Float32Array(W * H), o = new Float32Array(W * H);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          let v = 0;
+          for (let d = -SS_R; d <= SS_R; d++) v += src[y * W + Math.min(W - 1, Math.max(0, x + d))] * SS_K[d + SS_R];
+          t[y * W + x] = v;
+        }
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          let v = 0;
+          for (let d = -SS_R; d <= SS_R; d++) v += t[Math.min(H - 1, Math.max(0, y + d)) * W + x] * SS_K[d + SS_R];
+          o[y * W + x] = v;
+        }
+        return o;
+      };
+      const XX = new Float32Array(W * H), YY = new Float32Array(W * H), XY = new Float32Array(W * H);
+      for (let i = 0; i < W * H; i++) { XX[i] = X[i] * X[i]; YY[i] = Y[i] * Y[i]; XY[i] = X[i] * Y[i]; }
+      const mx = blur(X), my = blur(Y), mxx = blur(XX), myy = blur(YY), mxy = blur(XY);
+      let acc = 0, n = 0;
+      for (let y = SS_R; y < H - SS_R; y++) {
+        for (let x = SS_R; x < W - SS_R; x++) {
+          const i = y * W + x, ux = mx[i], uy = my[i];
+          const vx = mxx[i] - ux * ux, vy = myy[i] - uy * uy, vxy = mxy[i] - ux * uy;
+          acc += ((2 * ux * uy + C1) * (2 * vxy + C2)) /
+                 ((ux * ux + uy * uy + C1) * (vx + vy + C2));
+          n++;
+        }
+      }
+      total += acc / n;
+    }
+    return total / 3;
+  }
+
+  const mCache = new Map();
+  function cachedMetric(tag, a, b) {
+    if (mCache.has(tag)) return mCache.get(tag);
+    const m = { psnr: psnr(a, b), ssim: ssim(a, b) };
+    mCache.set(tag, m);
+    return m;
+  }
+
+  /* 搜出与左图 PSNR 最高的真高斯 sigma。粗到细:先 1.0 步长,再 0.1。
+     和 Python 侧 best_gauss() 同一策略 —— 已核对过不会落进局部极值。 */
+  const autoCache = new Map();
+  function bestSigma(x, w, n) {
+    const key = w + '|' + n;
+    if (autoCache.has(key)) return autoCache.get(key);
+    const guess = Math.sqrt(16 + (64 / 12) * n * (w * w - 1));
+    let lo = Math.max(1, guess - 4), hi = guess + 6, best = guess, bp = -1;
+    for (let s = lo; s <= hi + 1e-9; s += 1.0) {
+      const p = psnr(x, gaussBlur(origData, s));
+      if (p > bp) { bp = p; best = s; }
+    }
+    let c = best; bp = -1;
+    for (let s = Math.max(0.5, c - 1); s <= c + 1 + 1e-9; s += 0.1) {
+      const sr = Math.round(s * 10) / 10;
+      const p = psnr(x, gaussBlur(origData, sr));
+      if (p > bp) { bp = p; best = sr; }
+    }
+    autoCache.set(key, best);
+    return best;
+  }
+
+  function diffMap(data) {
+    const out = new ImageData(W, H);
+    const A = origData.data, B = data.data, O = out.data;
+    for (let i = 0; i < A.length; i += 4) {
+      const e = Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]);
+      const v = Math.min(255, e);
+      O[i] = v; O[i + 1] = Math.round(v * 0.55); O[i + 2] = Math.round(v * 0.25); O[i + 3] = 255;
+    }
+    return out;
+  }
+
+  // ---------- 绘制 ----------
+  function paint(cv, data, z) {
+    cv.width = W; cv.height = H;
+    cv.style.width = Math.round(W * z) + 'px';
+    cv.style.height = Math.round(H * z) + 'px';
+    cv.getContext('2d').putImageData(data, 0, 0);
+  }
+
+  function paintSplit(cv, a, b, at, z) {
+    cv.width = W; cv.height = H;
+    cv.style.width = Math.round(W * z) + 'px';
+    cv.style.height = Math.round(H * z) + 'px';
+    const x = cv.getContext('2d');
+    x.putImageData(a, 0, 0);
+    const cut = Math.round(W * at);
+    if (cut < W) {
+      const tc = off(W, H);
+      tc.getContext('2d').putImageData(b, 0, 0);
+      x.drawImage(tc, cut, 0, W - cut, H, cut, 0, W - cut, H);
+    }
+    $('splitLine').style.left = Math.round(W * z * at) + 'px';
+  }
+
+  const fmtP = p => (p === Infinity ? '∞' : p.toFixed(2) + 'dB');
+
+  let renderSeq = 0;
+  async function render() {
+    /* 先把这一帧要用的状态定住 —— 下面有 await,期间用户可能又拖了滑块。
+       如果 await 之后再读 st.*,算出的指标会被塞进另一档位的缓存键里。 */
+    const F = {
+      w: st.w, n: st.n, sigma: st.sigma, autoSig: st.autoSig,
+      layout: st.layout, zoom: st.zoom, diff: st.diff, nearest: st.nearest,
+      peek: st.peek, breathe: st.breathe, splitAt: st.splitAt,
+    };
+    const seq = ++renderSeq;
+
+    const heavy = F.n >= 5 || F.w >= 11;
+    if (heavy) {
+      $('busy').textContent = '计算中 ...';
+      $('busy').classList.add('on');
+      await new Promise(r => setTimeout(r, 0));
+      if (seq !== renderSeq) return;
+    }
+
+    // 呼吸感动画:用当前相位那一帧的小图,不进缓存
+    const override = (F.breathe && shiftFrames.length)
+      ? shiftFrames[breathePhase % shiftFrames.length] : null;
+    let A = frost(F.w, F.n, F.nearest, override);
+
+    const sig = F.autoSig ? bestSigma(A, F.w, F.n) : F.sigma;
+    if (F.autoSig && Math.abs(sig - st.sigma) > 1e-6 && seq === renderSeq) {
+      st.sigma = sig;
+      $('rs').value = sig; $('vs').textContent = sig.toFixed(1);
+    }
+    let B = gaussBlur(origData, sig);
+
+    if (seq !== renderSeq) return;
+
+    const sigF = Math.sqrt(16 + (64 / 12) * F.n * (F.w * F.w - 1));
+    const mA = override ? null : cachedMetric('a|' + F.w + '|' + F.n + '|' + (F.nearest ? 'n' : 'b'), origData, A);
+    const mB = cachedMetric('b|' + Math.round(sig * 10), origData, B);
+    const mAB = override ? null
+      : cachedMetric('ab|' + F.w + '|' + F.n + '|' + (F.nearest ? 'n' : 'b') + '|' + Math.round(sig * 10), A, B);
+
+    // 显示用的图层
+    let showA = F.peek ? origData : (F.diff ? diffMap(A) : A);
+    let showB = F.peek ? origData : (F.diff ? diffMap(B) : B);
+
+    const boxes = F.n > 0 && F.w > 1 ? `+ ${2 * F.n} 趟 box(${F.w})` : '一次卷积都没做';
+    $('capA').textContent = `双表法 · box(${F.w})×${F.n}`;
+    $('subA').textContent = `${(ENC.dual_bytes / 1024).toFixed(1)} KB 码流 ${boxes}`
+      + (mA ? ` | ${fmtP(mA.psnr)} / SSIM ${mA.ssim.toFixed(3)}` : ' | 动画中');
+    $('capB').textContent = `真高斯 σ=${sig.toFixed(1)}`;
+    $('subB').textContent = `需要全部 ${(W * H * 3 / 1024).toFixed(0)} KB 像素`
+      + ` | ${fmtP(mB.psnr)} / SSIM ${mB.ssim.toFixed(3)}`;
+
+    if (F.layout === 'split') {
+      $('panes').style.display = 'none';
+      $('splitWrap').style.display = 'block';
+      paintSplit($('cvS'), showA, showB, F.splitAt, F.zoom);
+    } else {
+      $('panes').style.display = 'flex';
+      $('splitWrap').style.display = 'none';
+      paint($('cvA'), showA, F.zoom);
+      paint($('cvB'), showB, F.zoom);
+    }
+
+    $('sigNote').innerHTML = `公式 σ = <b>${sigF.toFixed(2)}</b>`
+      + (mAB ? ` · 实测最匹配 σ = <b>${sig.toFixed(1)}</b>(公式低估 ${(sig - sigF).toFixed(2)})` : '');
+
+    $('mtb').innerHTML = [
+      mA ? `<tr><td>A 双表 vs 原图</td><td>${fmtP(mA.psnr)}</td><td>${mA.ssim.toFixed(4)}</td></tr>` : '',
+      `<tr><td>B 高斯 vs 原图</td><td>${fmtP(mB.psnr)}</td><td>${mB.ssim.toFixed(4)}</td></tr>`,
+      mAB ? `<tr class="hl"><td>A vs B</td><td>${fmtP(mAB.psnr)}</td><td>${mAB.ssim.toFixed(4)}</td></tr>` : '',
+    ].join('');
+
+    // 嵌入式算力:小图 px x 3 通道 x 可分离 2 趟 x n x ~3 运算
+    const ops = SW * SH * 3 * 2 * F.n * 3;
+    $('costNote').innerHTML = F.n > 0 && F.w > 1
+      ? `后处理 ≈ <b>${ops.toLocaleString()}</b> 次整数运算(${SW}×${SH} 小图)<br>`
+        + `100MHz M4 约 ${(ops / 1e5).toFixed(2)} ms,480MHz M7 约 ${(ops / 4.8e5).toFixed(2)} ms`
+      : '无后处理 —— σ 完全来自 1/8 解码 + 双线性上采样的采样几何';
+
+    document.querySelectorAll('#presetList .p').forEach(el => {
+      el.classList.toggle('on', +el.dataset.w === F.w && +el.dataset.n === F.n);
+    });
+
+    if (heavy) $('busy').classList.remove('on');
+  }
+
+  // 拖滑块时别每帧都重算,合并到下一个动画帧
+  let pending = false;
+  function schedule() {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => { pending = false; render(); });
+  }
+
+  // ---------- 控件 ----------
+  function buildPresets() {
+    $('presetList').innerHTML = D.presets.map(p =>
+      `<div class="p" data-w="${p.w}" data-n="${p.n}">`
+      + `<span class="k">box(${p.w})×${p.n}</span>`
+      + `<span class="d">${p.tag}</span>`
+      + `<span class="s">σ≈${p.sigmaMeasured.toFixed(1)}</span></div>`
+    ).join('');
+    $('presetList').querySelectorAll('.p').forEach(el => {
+      el.onclick = () => {
+        st.w = +el.dataset.w; st.n = +el.dataset.n;
+        $('rw').value = st.w; $('vw').textContent = st.w;
+        $('rn').value = st.n; $('vn').textContent = st.n;
+        schedule();
+      };
+    });
+  }
+
+  $('rw').oninput = e => { st.w = +e.target.value; $('vw').textContent = st.w; schedule(); };
+  $('rn').oninput = e => { st.n = +e.target.value; $('vn').textContent = st.n; schedule(); };
+  $('rs').oninput = e => {
+    st.sigma = +e.target.value; $('vs').textContent = st.sigma.toFixed(1);
+    if (st.autoSig) { st.autoSig = false; $('autoSig').checked = false; }
+    schedule();
+  };
+  $('autoSig').onchange = e => { st.autoSig = e.target.checked; schedule(); };
+  $('layout').onchange = e => { st.layout = e.target.value; schedule(); };
+  $('rz').oninput = e => { st.zoom = +e.target.value; $('vz').textContent = st.zoom.toFixed(2) + 'x'; schedule(); };
+  $('diff').onchange = e => { st.diff = e.target.checked; schedule(); };
+  $('nearest').onchange = e => { st.nearest = e.target.checked; schedule(); };
+  $('breathe').onchange = e => { st.breathe = e.target.checked; toggleBreathe(); };
+
+  function toggleBreathe() {
+    if (breatheTimer) { clearInterval(breatheTimer); breatheTimer = null; }
+    if (st.breathe && shiftFrames.length) {
+      breatheTimer = setInterval(() => { breathePhase++; render(); }, 180);
+    }
+    schedule();
+  }
+
+  // 分屏拖动
+  (() => {
+    const wrap = $('splitWrap');
+    let drag = false;
+    const upd = ev => {
+      const r = wrap.getBoundingClientRect();
+      st.splitAt = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      schedule();
+    };
+    wrap.onpointerdown = ev => { drag = true; wrap.setPointerCapture(ev.pointerId); upd(ev); };
+    wrap.onpointermove = ev => { if (drag) upd(ev); };
+    wrap.onpointerup = ev => { drag = false; wrap.releasePointerCapture(ev.pointerId); };
+  })();
+
+  addEventListener('keydown', ev => {
+    if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return;
+    const idx = D.presets.findIndex(p => p.w === st.w && p.n === st.n);
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') {
+      const d = ev.key === 'ArrowRight' ? 1 : -1;
+      const ni = Math.max(0, Math.min(D.presets.length - 1, (idx < 0 ? 0 : idx) + d));
+      const p = D.presets[ni];
+      st.w = p.w; st.n = p.n;
+      $('rw').value = st.w; $('vw').textContent = st.w;
+      $('rn').value = st.n; $('vn').textContent = st.n;
+      ev.preventDefault(); schedule();
+    } else if (ev.code === 'Space' && !st.peek) {
+      st.peek = true; ev.preventDefault(); schedule();
+    } else if (ev.key === 's' || ev.key === 'S') {
+      st.layout = st.layout === 'side' ? 'split' : 'side';
+      $('layout').value = st.layout; schedule();
+    } else if (ev.key === 'd' || ev.key === 'D') {
+      st.diff = !st.diff; $('diff').checked = st.diff; schedule();
+    } else if (ev.key === 'b' || ev.key === 'B') {
+      st.breathe = !st.breathe; $('breathe').checked = st.breathe; toggleBreathe();
+    }
+  });
+  addEventListener('keyup', ev => {
+    if (ev.code === 'Space') { st.peek = false; schedule(); }
+  });
+
+  // ---------- 导出 ----------
+  $('exp').onclick = () => {
+    const F = { w: st.w, n: st.n, nearest: st.nearest };
+    const A = frost(F.w, F.n, F.nearest, null);
+    const sig = st.autoSig ? bestSigma(A, F.w, F.n) : st.sigma;
+    const B = gaussBlur(origData, sig);
+    const pad = 14, cap = 44;
+    const c = off(pad + 3 * (W + pad), pad + H + cap);
+    const x = c.getContext('2d');
+    x.fillStyle = '#181920'; x.fillRect(0, 0, c.width, c.height);
+    [[origData, '原图', `${W}×${H}`],
+     [A, `双表法 box(${F.w})×${F.n}`, `${(ENC.dual_bytes / 1024).toFixed(1)} KB 码流`],
+     [B, `真高斯 σ=${sig.toFixed(1)}`, `${(W * H * 3 / 1024).toFixed(0)} KB 像素`]
+    ].forEach(([d, t, s], i) => {
+      const px = pad + i * (W + pad);
+      const t2 = off(W, H); t2.getContext('2d').putImageData(d, 0, 0);
+      x.drawImage(t2, px, pad);
+      x.fillStyle = '#eceef4'; x.font = '600 16px system-ui, "Microsoft YaHei", sans-serif';
+      x.fillText(t, px, pad + H + 20);
+      x.fillStyle = '#8b8f9e'; x.font = '12px ui-monospace, Consolas, monospace';
+      x.fillText(s, px, pad + H + 37);
+    });
+    c.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `frostglass_w${F.w}n${F.n}_vs_gauss${sig.toFixed(1)}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }, 'image/png');
+  };
+
+  // ---------- 启动 ----------
+  (async () => {
+    const oimg = await loadDataURL('image/png', D.origBase64);
+    origData = imageDataOf(oimg, W, H);
+    const simg = await loadDataURL('image/png', D.smallBase64);
+    smallData = imageDataOf(simg, SW, SH);
+
+    if (D.shiftFrames && D.shiftFrames.length) {
+      // 平移帧比主图小 8px(裁掉平移量),这里按原尺寸缩放对齐就够看抖动了
+      shiftFrames = await Promise.all(D.shiftFrames.map(async b64 => {
+        const im = await loadDataURL('image/png', b64);
+        return imageDataOf(im, SW, SH);
+      }));
+    } else {
+      $('breathe').disabled = true;
+      $('breathe').parentElement.style.opacity = .4;
+    }
+
+    $('btb').innerHTML = [
+      `<tr><td>双表码流</td><td>${ENC.dual_bytes.toLocaleString()} B</td></tr>`,
+      `<tr><td>bpp</td><td>${ENC.bpp}</td></tr>`,
+      `<tr class="hl"><td>vs 普通 q75</td><td>${ENC.ratio_vs_q75}×</td></tr>`,
+      `<tr><td>Q(0,0)</td><td>${ENC.q00_y} / ${ENC.q00_c}</td></tr>`,
+      `<tr><td>Q_enc AC → Q_dec AC</td><td>${ENC.ac_enc} → ${ENC.ac_dec}</td></tr>`,
+      `<tr><td>1/8 小图</td><td>${SW}×${SH}</td></tr>`,
+      `<tr><td>小图 RGB565</td><td>${D.meta.small.rgb565_bytes.toLocaleString()} B</td></tr>`,
+    ].join('');
+
+    buildPresets();
+    // 默认落在 iOS 风格那档 —— 它是「与真高斯已经分不出」的第一个甜点位
+    const dflt = D.presets.find(p => p.w === 3 && p.n === 3) || D.presets[0];
+    st.w = dflt.w; st.n = dflt.n;
+    $('rw').value = st.w; $('vw').textContent = st.w;
+    $('rn').value = st.n; $('vn').textContent = st.n;
+    render();
+  })();
+})();
+</script>
+</body>
+</html>

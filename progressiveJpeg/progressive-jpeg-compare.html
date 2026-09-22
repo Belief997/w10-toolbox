@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Progressive JPEG 首扫 vs 高斯模糊 · 对比</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #eceef4; overflow: hidden; user-select: none;
+    background: #16171c;
+    display: flex;
+  }
+
+  /* ---- 舞台 ---- */
+  #stage {
+    flex: 1; min-width: 0; height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 20px; overflow: auto;
+    background: radial-gradient(120% 120% at 50% 35%, #23252d 0%, #191a20 65%, #131419 100%);
+  }
+  #panes { display: flex; gap: 18px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+  .pane { display: flex; flex-direction: column; gap: 8px; }
+  .pane canvas {
+    display: block; border-radius: 10px; background: #0e0f13;
+    box-shadow: 0 18px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.07);
+    image-rendering: auto;
+  }
+  .pane .cap { font-size: 13px; font-weight: 600; }
+  .pane .sub {
+    font-size: 11.5px; opacity: .55; font-family: ui-monospace, Consolas, monospace;
+    min-height: 15px;
+  }
+  .pane .cap .tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 5px; margin-right: 7px; vertical-align: 1px;
+  }
+  .tag.a { background: rgba(96,165,250,.2); color: #93c5fd; }
+  .tag.b { background: rgba(251,191,36,.2); color: #fcd34d; }
+
+  /* 分屏拖动 */
+  #splitWrap { position: relative; cursor: ew-resize; touch-action: none; }
+  #splitWrap canvas { box-shadow: 0 18px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.07); }
+  #splitLine {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,.85);
+    box-shadow: 0 0 10px rgba(0,0,0,.7); pointer-events: none;
+  }
+  #splitLine::after {
+    content: ""; position: absolute; left: 50%; top: 50%;
+    width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+    background: rgba(255,255,255,.9); box-shadow: 0 2px 10px rgba(0,0,0,.5);
+  }
+
+  #hint { font-size: 12px; opacity: .4; text-align: center; }
+  #hint kbd {
+    background: rgba(255,255,255,.1); border-radius: 4px; padding: 1px 5px;
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+  }
+
+  /* ---- 右侧面板 ---- */
+  #panel {
+    width: 330px; flex: 0 0 330px; height: 100%;
+    background: rgba(30,32,39,.92); backdrop-filter: blur(14px);
+    border-left: 1px solid rgba(255,255,255,.08);
+    padding: 20px 18px; overflow-y: auto;
+    box-shadow: -8px 0 30px rgba(0,0,0,.3);
+  }
+  #panel h1 { font-size: 15px; margin: 0 0 4px; font-weight: 700; letter-spacing: .02em; }
+  #panel .sub { font-size: 12px; opacity: .5; margin: 0 0 18px; line-height: 1.5; }
+
+  .group { margin: 0 0 20px; }
+  .group > .gt {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    opacity: .4; margin: 0 0 9px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
+  .row label { font-size: 13px; opacity: .8; white-space: nowrap; flex: 0 0 auto; }
+  .row .val {
+    margin-left: auto; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px; opacity: .75; min-width: 52px; text-align: right;
+  }
+  input[type=range] { flex: 1; min-width: 0; accent-color: #fcd34d; }
+  select {
+    flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid rgba(255,255,255,.16);
+    border-radius: 8px; background: #23252d; color: inherit;
+  }
+  label.chk { display: flex; align-items: center; gap: 8px; font-size: 13px; opacity: .85; cursor: pointer; }
+  label.chk input { accent-color: #fcd34d; }
+
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .presets button {
+    flex: 1 1 auto; padding: 5px 7px; font-size: 11px; border-radius: 7px;
+    border: 1px solid rgba(255,255,255,.14); background: #23252d; color: inherit; cursor: pointer;
+    font-family: ui-monospace, Consolas, monospace; white-space: nowrap;
+  }
+  .presets button:hover { background: #2e313b; }
+  .presets button.on { border-color: #fcd34d; color: #fcd34d; }
+
+  button.primary {
+    width: 100%; padding: 11px; margin-top: 4px; font-size: 14px; font-weight: 600;
+    border: none; border-radius: 11px; cursor: pointer; color: #3a2c00;
+    background: linear-gradient(180deg, #ffd24d, #f4b400);
+    box-shadow: 0 6px 18px rgba(244,180,0,.28);
+  }
+  button.primary:hover { filter: brightness(1.05); }
+
+  /* 指标表 */
+  table.m { width: 100%; border-collapse: collapse; font-size: 11.5px; font-family: ui-monospace, Consolas, monospace; }
+  table.m th, table.m td { padding: 4px 3px; text-align: right; }
+  table.m th { opacity: .4; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,.1); }
+  table.m td:first-child, table.m th:first-child { text-align: left; }
+  table.m tr.hl td { color: #fcd34d; }
+  table.m tr.dim td { opacity: .45; }
+
+  #scanList { max-height: 260px; overflow-y: auto; }
+  #scanList .s {
+    display: flex; gap: 8px; align-items: baseline; padding: 5px 6px; border-radius: 6px;
+    font-size: 11.5px; cursor: pointer; font-family: ui-monospace, Consolas, monospace;
+  }
+  #scanList .s:hover { background: rgba(255,255,255,.05); }
+  #scanList .s.on { background: rgba(252,211,77,.14); color: #fcd34d; }
+  #scanList .s .n { flex: 0 0 18px; opacity: .5; }
+  #scanList .s .d { flex: 1; min-width: 0; font-family: system-ui, sans-serif; font-size: 11.5px; }
+  #scanList .s .b { opacity: .6; }
+
+  .note {
+    font-size: 11.5px; line-height: 1.6; opacity: .5; margin: 10px 0 0;
+    padding-left: 10px; border-left: 2px solid rgba(255,255,255,.12);
+  }
+  #err {
+    margin: 40px auto; max-width: 620px; padding: 22px 26px; line-height: 1.75;
+    background: rgba(220,60,60,.1); border: 1px solid rgba(220,60,60,.35);
+    border-radius: 12px; font-size: 13.5px; display: none;
+  }
+  #err code {
+    background: rgba(0,0,0,.4); padding: 2px 6px; border-radius: 5px;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="err"></div>
+  <div id="panes">
+    <div class="pane" id="paneA">
+      <canvas id="cvA"></canvas>
+      <div class="cap"><span class="tag a">A</span><span id="capA">渐进 JPEG 首扫</span></div>
+      <div class="sub" id="subA"></div>
+    </div>
+    <div class="pane" id="paneB">
+      <canvas id="cvB"></canvas>
+      <div class="cap"><span class="tag b">B</span><span id="capB">高斯模糊</span></div>
+      <div class="sub" id="subB"></div>
+    </div>
+    <div class="pane" id="paneSplit" style="display:none">
+      <div id="splitWrap"><canvas id="cvS"></canvas><div id="splitLine"></div></div>
+      <div class="cap">分屏 · 左 <span class="tag a">A</span> 右 <span class="tag b">B</span></div>
+      <div class="sub" id="subS">拖动分割线对比</div>
+    </div>
+  </div>
+  <div id="hint">
+    <kbd>←</kbd> <kbd>→</kbd> 切换扫描段 &nbsp;·&nbsp; <kbd>↑</kbd> <kbd>↓</kbd> 调 sigma
+    &nbsp;·&nbsp; 按住 <kbd>空格</kbd> 看原图 &nbsp;·&nbsp; <kbd>S</kbd> 分屏
+  </div>
+</div>
+
+<div id="panel">
+  <h1>Progressive JPEG · 首扫 vs 高斯模糊</h1>
+  <p class="sub" id="srcInfo">加载中…</p>
+
+  <div class="group">
+    <div class="gt">A · 渐进 JPEG 扫描段</div>
+    <div class="row">
+      <label>累计段数</label>
+      <input type="range" id="scan" min="1" max="10" step="1" value="1">
+      <span class="val" id="scanVal">1 / 10</span>
+    </div>
+    <div id="scanList"></div>
+    <div class="row" style="margin-top:10px">
+      <label class="chk"><input type="checkbox" id="smooth" checked> DC 平滑(浏览器行为)</label>
+    </div>
+    <p class="note" id="smoothNote"></p>
+  </div>
+
+  <div class="group">
+    <div class="gt">B · 高斯模糊</div>
+    <div class="row">
+      <label>sigma</label>
+      <input type="range" id="sigma" min="0" max="8" step="0.1" value="3.5">
+      <span class="val" id="sigmaVal">3.5 px</span>
+    </div>
+    <div class="presets" id="sigPresets"></div>
+    <p class="note" id="sigNote"></p>
+  </div>
+
+  <div class="group">
+    <div class="gt">显示</div>
+    <div class="row"><label>布局</label>
+      <select id="layout">
+        <option value="side">并排 A | B</option>
+        <option value="split">分屏(拖动分割线)</option>
+      </select>
+    </div>
+    <div class="row"><label>缩放</label>
+      <input type="range" id="zoom" min="0.5" max="3" step="0.1" value="1">
+      <span class="val" id="zoomVal">1.0x</span>
+    </div>
+    <div class="row"><label class="chk"><input type="checkbox" id="diff"> 显示与原图的差异图</label></div>
+  </div>
+
+  <div class="group">
+    <div class="gt">客观指标(vs 原图)</div>
+    <table class="m" id="mtab">
+      <tr><th>对象</th><th>字节</th><th>PSNR</th><th>SSIM</th></tr>
+    </table>
+    <p class="note" id="verdict"></p>
+  </div>
+
+  <div class="group">
+    <div class="gt">导出</div>
+    <button class="primary" id="dl">导出当前对比图 PNG</button>
+  </div>
+</div>
+
+<script src="out/data.js" onerror="window.__pjLoadErr=1"></script>
+<script>
+(() => {
+  'use strict';
+
+  const $ = id => document.getElementById(id);
+  const D = window.PJ_DATA;
+
+  if (!D || window.__pjLoadErr) {
+    $('err').style.display = 'block';
+    $('err').innerHTML =
+      '<b>没找到 <code>out/data.js</code></b><br>' +
+      '先在本目录跑一次生成脚本:<br><br>' +
+      '<code>python make_progressive.py</code><br><br>' +
+      '它会产出 <code>out/data.js</code>(图片已 base64 内联,' +
+      '所以 <code>file://</code> 直接双击本页也能读 canvas 像素,无需起服务器)。';
+    $('panes').style.display = 'none';
+    $('hint').style.display = 'none';
+    $('panel').style.display = 'none';
+    return;
+  }
+
+  const META = D.meta, SCANS = D.scanInfo, OFFS = D.scanOffsets;
+  const W = META.source.width, H = META.source.height;
+  const NS = SCANS.length;
+
+  // ---------- 状态 ----------
+  const st = {
+    scan: 1, sigma: 3.5, smooth: true, layout: 'side',
+    zoom: 1, diff: false, peek: false, splitAt: 0.5,
+  };
+
+  // ---------- 像素缓存 ----------
+  let origData = null;             // ImageData,原图
+  let blocksData = null;           // ImageData,ffmpeg 解的无平滑首扫(可能没有)
+  const scanCache = new Map();     // "k|smooth" -> ImageData
+  const blurCache = new Map();     // sigma(定点) -> ImageData
+  let progBytes = null;            // 渐进 JPEG 原始字节
+
+  const off = (w, h) => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    return c;
+  };
+
+  function imageDataOf(img) {
+    const c = off(W, H), x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(img, 0, 0, W, H);
+    return x.getImageData(0, 0, W, H);
+  }
+
+  const b64ToBytes = b64 => {
+    const bin = atob(b64), a = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+    return a;
+  };
+
+  const loadBlob = blob => new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(blob);
+    img.onload = () => { URL.revokeObjectURL(url); res(img); };
+    img.onerror = e => { URL.revokeObjectURL(url); rej(e); };
+    img.src = url;
+  });
+
+  const loadDataURL = (mime, b64) => new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = `data:${mime};base64,${b64}`;
+  });
+
+  /* 取前 k 段扫描 + 补 EOI,交给浏览器自己的 JPEG 解码器解。
+     浏览器解渐进图时对未收全的频段会做 DC block smoothing —— 这正是
+     真实网络加载时用户看到的画面。
+
+     smooth=false 只在 k=1 时有意义,且浏览器没有开关能关掉平滑,所以直接用
+     脚本里 ffmpeg 解出的那张(已 base64 内联)。之前试过在 JS 里对已平滑的
+     结果再求 8x8 块均值来近似,和真值差 0.3 dB(18.82 vs 19.13),会让面板
+     里的数对不上 metrics.json,故弃用。 */
+  async function scanImageData(k, smooth) {
+    const useBlocks = !smooth && k === 1 && blocksData;
+    const key = k + '|' + (useBlocks ? 'b' : 's');
+    if (scanCache.has(key)) return scanCache.get(key);
+    if (useBlocks) { scanCache.set(key, blocksData); return blocksData; }
+
+    const cut = OFFS[k - 1];
+    const buf = new Uint8Array(cut + 2);
+    buf.set(progBytes.subarray(0, cut), 0);
+    buf[cut] = 0xFF; buf[cut + 1] = 0xD9;         // EOI
+
+    const img = await loadBlob(new Blob([buf], { type: 'image/jpeg' }));
+    const data = imageDataOf(img);
+    scanCache.set(key, data);
+    return data;
+  }
+
+  /* 可分离高斯模糊,float32 中间量,边缘 nearest 夹取,截断半径 4 sigma。
+     和 make_progressive.py 里 scipy.ndimage.gaussian_filter 的口径一致,
+     所以 JS 这边算出的 PSNR / SSIM 和 metrics.json 对得上。 */
+  function gaussBlur(src, sigma) {
+    const key = Math.round(sigma * 10);
+    if (blurCache.has(key)) return blurCache.get(key);
+    if (sigma <= 0) { blurCache.set(key, src); return src; }
+
+    const rad = Math.max(1, Math.ceil(sigma * 4));
+    const ker = new Float32Array(2 * rad + 1);
+    let sum = 0;
+    for (let i = -rad; i <= rad; i++) {
+      const v = Math.exp(-(i * i) / (2 * sigma * sigma));
+      ker[i + rad] = v; sum += v;
+    }
+    for (let i = 0; i < ker.length; i++) ker[i] /= sum;
+
+    const N = W * H;
+    const tmp = new Float32Array(N * 3), out2 = new Float32Array(N * 3);
+    const sd = src.data;
+
+    // 水平
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let r = 0, g = 0, b = 0;
+        for (let t = -rad; t <= rad; t++) {
+          const xx = Math.min(W - 1, Math.max(0, x + t));   // nearest
+          const i = (y * W + xx) * 4, w = ker[t + rad];
+          r += sd[i] * w; g += sd[i + 1] * w; b += sd[i + 2] * w;
+        }
+        const o = (y * W + x) * 3;
+        tmp[o] = r; tmp[o + 1] = g; tmp[o + 2] = b;
+      }
+    }
+    // 垂直
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let r = 0, g = 0, b = 0;
+        for (let t = -rad; t <= rad; t++) {
+          const yy = Math.min(H - 1, Math.max(0, y + t));
+          const i = (yy * W + x) * 3, w = ker[t + rad];
+          r += tmp[i] * w; g += tmp[i + 1] * w; b += tmp[i + 2] * w;
+        }
+        const o = (y * W + x) * 3;
+        out2[o] = r; out2[o + 1] = g; out2[o + 2] = b;
+      }
+    }
+
+    const res = new ImageData(W, H);
+    for (let i = 0, j = 0, k2 = 0; i < N; i++, j += 4, k2 += 3) {
+      res.data[j] = Math.max(0, Math.min(255, Math.round(out2[k2])));
+      res.data[j + 1] = Math.max(0, Math.min(255, Math.round(out2[k2 + 1])));
+      res.data[j + 2] = Math.max(0, Math.min(255, Math.round(out2[k2 + 2])));
+      res.data[j + 3] = 255;
+    }
+    blurCache.set(key, res);
+    return res;
+  }
+
+  // ---------- 指标 ----------
+  function psnr(a, b) {
+    let se = 0;
+    const A = a.data, B = b.data;
+    for (let i = 0; i < A.length; i += 4) {
+      const d0 = A[i] - B[i], d1 = A[i + 1] - B[i + 1], d2 = A[i + 2] - B[i + 2];
+      se += d0 * d0 + d1 * d1 + d2 * d2;
+    }
+    const mse = se / (W * H * 3);
+    return mse === 0 ? Infinity : 10 * Math.log10(255 * 255 / mse);
+  }
+
+  /* 标准 SSIM:11x11 高斯窗 sigma=1.5,逐通道求均值。
+     窗口整体落在图内(裁边 5px),与 skimage 的默认裁边一致。 */
+  const SS_R = 5, SS_SIG = 1.5;
+  const SS_K = (() => {
+    const k = new Float32Array(11); let s = 0;
+    for (let i = -SS_R; i <= SS_R; i++) { const v = Math.exp(-(i * i) / (2 * SS_SIG * SS_SIG)); k[i + SS_R] = v; s += v; }
+    for (let i = 0; i < 11; i++) k[i] /= s;
+    return k;
+  })();
+
+  function ssim(a, b) {
+    const C1 = 6.5025, C2 = 58.5225;
+    let total = 0;
+    for (let ch = 0; ch < 3; ch++) {
+      // 抽通道
+      const X = new Float32Array(W * H), Y = new Float32Array(W * H);
+      for (let i = 0, j = ch; i < W * H; i++, j += 4) { X[i] = a.data[j]; Y[i] = b.data[j]; }
+      const blur = src => {
+        const t = new Float32Array(W * H), o = new Float32Array(W * H);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          let v = 0;
+          for (let d = -SS_R; d <= SS_R; d++) v += src[y * W + Math.min(W - 1, Math.max(0, x + d))] * SS_K[d + SS_R];
+          t[y * W + x] = v;
+        }
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          let v = 0;
+          for (let d = -SS_R; d <= SS_R; d++) v += t[Math.min(H - 1, Math.max(0, y + d)) * W + x] * SS_K[d + SS_R];
+          o[y * W + x] = v;
+        }
+        return o;
+      };
+      const XX = new Float32Array(W * H), YY = new Float32Array(W * H), XY = new Float32Array(W * H);
+      for (let i = 0; i < W * H; i++) { XX[i] = X[i] * X[i]; YY[i] = Y[i] * Y[i]; XY[i] = X[i] * Y[i]; }
+      const mx = blur(X), my = blur(Y), mxx = blur(XX), myy = blur(YY), mxy = blur(XY);
+
+      let acc = 0, n = 0;
+      for (let y = SS_R; y < H - SS_R; y++) {
+        for (let x = SS_R; x < W - SS_R; x++) {
+          const i = y * W + x;
+          const ux = mx[i], uy = my[i];
+          const vx = mxx[i] - ux * ux, vy = myy[i] - uy * uy, vxy = mxy[i] - ux * uy;
+          acc += ((2 * ux * uy + C1) * (2 * vxy + C2)) /
+                 ((ux * ux + uy * uy + C1) * (vx + vy + C2));
+          n++;
+        }
+      }
+      total += acc / n;
+    }
+    return total / 3;
+  }
+
+  // 指标缓存(算 SSIM 不便宜)
+  const mCache = new Map();
+  function metrics(tag, data) {
+    if (mCache.has(tag)) return mCache.get(tag);
+    const m = { psnr: psnr(origData, data), ssim: ssim(origData, data) };
+    mCache.set(tag, m);
+    return m;
+  }
+
+  function diffMap(data) {
+    const out = new ImageData(W, H);
+    const A = origData.data, B = data.data, O = out.data;
+    for (let i = 0; i < A.length; i += 4) {
+      // 放大 3x 的绝对差,便于肉眼看清误差分布
+      const e = Math.min(255, (Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2])));
+      const v = Math.min(255, e);
+      O[i] = v; O[i + 1] = Math.round(v * 0.55); O[i + 2] = Math.round(v * 0.25); O[i + 3] = 255;
+    }
+    return out;
+  }
+
+  // ---------- 绘制 ----------
+  function paint(cv, data, z) {
+    cv.width = W; cv.height = H;
+    cv.style.width = Math.round(W * z) + 'px';
+    cv.style.height = Math.round(H * z) + 'px';
+    cv.getContext('2d').putImageData(data, 0, 0);
+  }
+
+  const fmtKB = b => (b / 1024).toFixed(1) + ' KB';
+  const fmtDb = v => (v === Infinity ? '∞' : v.toFixed(2) + ' dB');
+
+  let busy = false, pending = false;
+
+  async function render() {
+    if (busy) { pending = true; return; }
+    busy = true;
+    try {
+      /* 先把这一帧要用的状态定住。scanImageData 里有 await,期间用户可能又拖了
+         滑块;如果 await 之后再读 st.*,算出来的指标就会被塞进另一段扫描的缓存
+         键里,面板上出现「前 5 段 = 18.8 dB」这种对不上的数。定住之后本帧自洽,
+         新状态由末尾的 pending 重跑一次即可。 */
+      const F = { scan: st.scan, sigma: st.sigma, smooth: st.smooth,
+                  peek: st.peek, diff: st.diff, layout: st.layout,
+                  zoom: st.zoom, splitAt: st.splitAt };
+      const sc = SCANS[F.scan - 1];
+      const noSmooth = !F.smooth && F.scan === 1 && blocksData;
+      const aRaw = F.peek ? origData : await scanImageData(F.scan, F.smooth);
+      const bRaw = F.peek ? origData : gaussBlur(origData, F.sigma);
+
+      const aShow = (F.diff && !F.peek) ? diffMap(aRaw) : aRaw;
+      const bShow = (F.diff && !F.peek) ? diffMap(bRaw) : bRaw;
+
+      if (F.layout === 'split') {
+        $('paneA').style.display = 'none';
+        $('paneB').style.display = 'none';
+        $('paneSplit').style.display = 'flex';
+        const cv = $('cvS');
+        cv.width = W; cv.height = H;
+        cv.style.width = Math.round(W * F.zoom) + 'px';
+        cv.style.height = Math.round(H * F.zoom) + 'px';
+        const x = cv.getContext('2d');
+        x.putImageData(bShow, 0, 0);
+        const cut = Math.round(W * F.splitAt);
+        if (cut > 0) x.putImageData(aShow, 0, 0, 0, 0, cut, H);
+        x.save();
+        x.strokeStyle = 'rgba(255,255,255,.85)'; x.lineWidth = 2;
+        x.beginPath(); x.moveTo(cut, 0); x.lineTo(cut, H); x.stroke();
+        x.restore();
+        $('splitLine').style.display = 'none';
+      } else {
+        $('paneA').style.display = 'flex';
+        $('paneB').style.display = 'flex';
+        $('paneSplit').style.display = 'none';
+        paint($('cvA'), aShow, F.zoom);
+        paint($('cvB'), bShow, F.zoom);
+      }
+
+      // 文案 + 指标
+      const aTag = `scan${F.scan}|${noSmooth ? 'b' : 's'}`;
+      const mA = metrics(aTag, aRaw);
+      const mB = metrics('blur' + Math.round(F.sigma * 10), bRaw);
+
+      const aName = F.scan === 1
+        ? (noSmooth ? '渐进 JPEG 首扫(仅 DC · 无平滑)' : '渐进 JPEG 首扫(仅 DC)')
+        : `渐进 JPEG 前 ${F.scan} 段扫描`;
+      $('capA').textContent = aName;
+      $('subA').textContent =
+        `${fmtKB(sc.bytes)} / ${(sc.ratio * 100).toFixed(1)}% 字节 · ${fmtDb(mA.psnr)} · SSIM ${mA.ssim.toFixed(4)}`;
+      $('capB').textContent = `高斯模糊 sigma = ${F.sigma.toFixed(1)}`;
+      $('subB').textContent =
+        `全部 ${fmtKB(META.source.bytes)} 已到位 · ${fmtDb(mB.psnr)} · SSIM ${mB.ssim.toFixed(4)}`;
+
+      // 表格
+      const rows = [
+        ['原图 PNG', fmtKB(META.source.bytes), '∞', '1.0000', 'dim'],
+        [F.scan === 1 ? (noSmooth ? 'A 首扫(无平滑)' : 'A 首扫') : `A 前 ${F.scan} 段`,
+          fmtKB(sc.bytes), fmtDb(mA.psnr), mA.ssim.toFixed(4), 'hl'],
+        [`B σ=${F.sigma.toFixed(1)}`, fmtKB(META.source.bytes), fmtDb(mB.psnr), mB.ssim.toFixed(4), 'hl'],
+        ['完整 JPEG', fmtKB(META.encode.progressive_bytes),
+          fmtDb(SCANS[NS - 1].psnr), SCANS[NS - 1].ssim.toFixed(4), 'dim'],
+      ];
+      $('mtab').innerHTML = '<tr><th>对象</th><th>字节</th><th>PSNR</th><th>SSIM</th></tr>' +
+        rows.map(r => `<tr class="${r[4]}"><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td></tr>`).join('');
+
+      // 结论
+      const dP = mA.psnr - mB.psnr, dS = mA.ssim - mB.ssim;
+      const cmp = Math.abs(dP) < 0.35 ? '两者失真程度基本相当' :
+        (dP > 0 ? `首扫比该模糊<b>更接近</b>原图 ${dP.toFixed(2)} dB`
+                : `该模糊比首扫<b>更接近</b>原图 ${(-dP).toFixed(2)} dB`);
+      $('verdict').innerHTML =
+        `A 只用了 <b>${(sc.ratio * 100).toFixed(1)}%</b> 的字节(${fmtKB(sc.bytes)});` +
+        `B 需要整张图都下载完才能做。<br>${cmp}(ΔSSIM ${dS >= 0 ? '+' : ''}${dS.toFixed(4)})。`;
+
+      $('scanVal').textContent = `${F.scan} / ${NS}`;
+      $('sigmaVal').textContent = F.sigma.toFixed(1) + ' px';
+      $('zoomVal').textContent = F.zoom.toFixed(1) + 'x';
+      document.querySelectorAll('#scanList .s').forEach((el, i) =>
+        el.classList.toggle('on', i + 1 === F.scan));
+      document.querySelectorAll('#sigPresets button').forEach(el =>
+        el.classList.toggle('on', Math.abs(+el.dataset.s - F.sigma) < 0.05));
+    } finally {
+      busy = false;
+      if (pending) { pending = false; render(); }
+    }
+  }
+
+  // ---------- 面板初始化 ----------
+  function initPanel() {
+    const s = META.source, e = META.encode, eq = META.equivalent_sigma;
+
+    $('srcInfo').innerHTML =
+      `${s.file} · ${W}×${H} · ${fmtKB(s.bytes)} PNG<br>` +
+      `→ progressive JPEG q${e.quality} ${e.subsampling} · ${fmtKB(e.progressive_bytes)} · ` +
+      `<b>${e.scan_count}</b> 段扫描` +
+      (s.alpha ? `<br><span style="opacity:.7">${s.alpha}</span>` : '');
+
+    $('scan').max = NS;
+    $('scanList').innerHTML = SCANS.map(r =>
+      `<div class="s" data-k="${r.index}">` +
+      `<span class="n">${r.index}</span>` +
+      `<span class="d">${r.desc}</span>` +
+      `<span class="b">${(r.ratio * 100).toFixed(0)}%</span>` +
+      `<span class="b">${r.psnr.toFixed(1)}dB</span></div>`).join('');
+    $('scanList').addEventListener('click', ev => {
+      const el = ev.target.closest('.s');
+      if (!el) return;
+      st.scan = +el.dataset.k; $('scan').value = st.scan; render();
+    });
+
+    const bp = eq.best_match_psnr.sigma, bs = eq.best_match_ssim.sigma, iso = eq.iso_distortion.sigma;
+    const presets = [
+      [1, '1.0'], [2, '2.0'], [bp, `${bp}★`], [bs, `${bs}◆`], [iso, `${iso}≡`], [6, '6.0'],
+    ];
+    const seen = new Set();
+    $('sigPresets').innerHTML = presets.filter(([v]) => {
+      if (seen.has(v)) return false; seen.add(v); return true;
+    }).map(([v, t]) => `<button data-s="${v}">${t}</button>`).join('');
+    $('sigPresets').addEventListener('click', ev => {
+      if (ev.target.tagName !== 'BUTTON') return;
+      st.sigma = +ev.target.dataset.s; $('sigma').value = st.sigma; render();
+    });
+
+    const th = eq.theory_box_filter;
+    $('sigNote').innerHTML =
+      `<b>★ σ=${bp}</b> 与首扫像素最接近(PSNR 峰值 ${eq.best_match_psnr.psnr_vs_scan1.toFixed(2)} dB)<br>` +
+      `<b>◆ σ=${bs}</b> 结构上最接近(SSIM 峰值 ${eq.best_match_ssim.ssim_vs_scan1.toFixed(4)})<br>` +
+      `<b>≡ σ=${iso}</b> 与首扫失真等量(同为 ${eq.iso_distortion.psnr_vs_orig.toFixed(2)} dB)<br>` +
+      `理论:DC-only 等于 8×8 求均值,盒式滤波等效 σ=w/√12 → 亮度 ${th.luma_box8.toFixed(2)}、` +
+      `色度(4:2:0,16×16)${th.chroma_box16.toFixed(2)}`;
+
+    const ns = META.first_scan_no_smoothing;
+    $('smoothNote').innerHTML =
+      '勾选 = libjpeg / 浏览器对未收全的频段做块平滑,渐进加载时真实所见。<br>' +
+      '取消 = 还原 DC 系数本身,每个 8×8 块一个色值。' +
+      (ns ? `<br>脚本用 ffmpeg 无平滑解出的首扫:${ns.psnr.toFixed(2)} dB / SSIM ${ns.ssim.toFixed(4)}` +
+            `,块内亮度标准差 ${ns.luma_std_in_8x8.toFixed(3)}(≈0 即纯色块)。` : '');
+  }
+
+  // ---------- 事件 ----------
+  const bind = (id, key, xf = Number) => $(id).addEventListener('input', e => {
+    st[key] = xf(e.target.value); render();
+  });
+  bind('scan', 'scan');
+  bind('sigma', 'sigma');
+  bind('zoom', 'zoom');
+  $('smooth').addEventListener('change', e => { st.smooth = e.target.checked; render(); });
+  $('diff').addEventListener('change', e => { st.diff = e.target.checked; render(); });
+  $('layout').addEventListener('change', e => { st.layout = e.target.value; render(); });
+
+  // 分屏拖动
+  (() => {
+    const wrap = $('splitWrap');
+    let drag = false;
+    const upd = ev => {
+      const r = $('cvS').getBoundingClientRect();
+      st.splitAt = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      render();
+    };
+    wrap.addEventListener('pointerdown', ev => { drag = true; wrap.setPointerCapture(ev.pointerId); upd(ev); });
+    wrap.addEventListener('pointermove', ev => { if (drag) upd(ev); });
+    wrap.addEventListener('pointerup', ev => { drag = false; wrap.releasePointerCapture(ev.pointerId); });
+  })();
+
+  addEventListener('keydown', ev => {
+    if (ev.repeat && ev.code !== 'Space') return;
+    switch (ev.code) {
+      case 'ArrowRight': st.scan = Math.min(NS, st.scan + 1); $('scan').value = st.scan; render(); break;
+      case 'ArrowLeft':  st.scan = Math.max(1, st.scan - 1);  $('scan').value = st.scan; render(); break;
+      case 'ArrowUp':    st.sigma = Math.min(8, +(st.sigma + 0.1).toFixed(1)); $('sigma').value = st.sigma; render(); break;
+      case 'ArrowDown':  st.sigma = Math.max(0, +(st.sigma - 0.1).toFixed(1)); $('sigma').value = st.sigma; render(); break;
+      case 'KeyS':
+        st.layout = st.layout === 'split' ? 'side' : 'split';
+        $('layout').value = st.layout; render(); break;
+      case 'Space':
+        ev.preventDefault();
+        if (!st.peek) { st.peek = true; render(); }
+        break;
+      default: return;
+    }
+    if (ev.code.startsWith('Arrow')) ev.preventDefault();
+  });
+  addEventListener('keyup', ev => {
+    if (ev.code === 'Space') { st.peek = false; render(); }
+  });
+
+  // 导出
+  $('dl').addEventListener('click', async () => {
+    const F = { scan: st.scan, sigma: st.sigma, smooth: st.smooth };
+    const sc = SCANS[F.scan - 1];
+    const noSmooth = !F.smooth && F.scan === 1 && blocksData;
+    const a = await scanImageData(F.scan, F.smooth);
+    const b = gaussBlur(origData, F.sigma);
+    const mA = metrics(`scan${F.scan}|${noSmooth ? 'b' : 's'}`, a);
+    const mB = metrics('blur' + Math.round(F.sigma * 10), b);
+
+    const pad = 16, cap = 46;
+    const c = off(pad + 3 * (W + pad), pad + H + cap + pad);
+    const x = c.getContext('2d');
+    x.fillStyle = '#16171c'; x.fillRect(0, 0, c.width, c.height);
+
+    const tiles = [
+      [origData, '原图', `${W}×${H} PNG · ${fmtKB(META.source.bytes)}`],
+      [a, F.scan === 1 ? (noSmooth ? '渐进 JPEG 首扫(仅 DC · 无平滑)' : '渐进 JPEG 首扫(仅 DC)')
+                       : `渐进 JPEG 前 ${F.scan} 段`,
+        `${fmtKB(sc.bytes)} · ${(sc.ratio * 100).toFixed(1)}% 字节 · ${fmtDb(mA.psnr)} · SSIM ${mA.ssim.toFixed(4)}`],
+      [b, `高斯模糊 σ = ${F.sigma.toFixed(1)}`,
+        `需整图 ${fmtKB(META.source.bytes)} · ${fmtDb(mB.psnr)} · SSIM ${mB.ssim.toFixed(4)}`],
+    ];
+    tiles.forEach(([data, t, s], i) => {
+      const tc = off(W, H); tc.getContext('2d').putImageData(data, 0, 0);
+      const px = pad + i * (W + pad);
+      x.drawImage(tc, px, pad);
+      x.strokeStyle = 'rgba(255,255,255,.14)'; x.lineWidth = 1;
+      x.strokeRect(px + .5, pad + .5, W - 1, H - 1);
+      x.fillStyle = '#eceef4';
+      x.font = '600 17px system-ui, "Microsoft YaHei", sans-serif';
+      x.fillText(t, px, pad + H + 22);
+      x.fillStyle = '#969aa8';
+      x.font = '13px ui-monospace, Consolas, monospace';
+      x.fillText(s, px, pad + H + 40);
+    });
+
+    c.toBlob(blob => {
+      const a2 = document.createElement('a');
+      a2.href = URL.createObjectURL(blob);
+      a2.download = `pjpeg-scan${F.scan}-vs-blur${F.sigma.toFixed(1)}.png`;
+      a2.click();
+      setTimeout(() => URL.revokeObjectURL(a2.href), 5000);
+    }, 'image/png');
+  });
+
+  // ---------- 启动 ----------
+  (async () => {
+    initPanel();
+    progBytes = b64ToBytes(D.progBase64);
+    const oimg = await loadDataURL(D.origMime || 'image/png', D.origBase64);
+    origData = imageDataOf(oimg);
+    if (D.blocksBase64) {
+      blocksData = imageDataOf(await loadDataURL('image/png', D.blocksBase64));
+    } else {
+      // 生成时没有 ffmpeg,拿不到无平滑版本,直接禁掉开关
+      const sm = $('smooth');
+      sm.checked = true; sm.disabled = true;
+      sm.closest('label').style.opacity = .4;
+    }
+
+    // 默认 sigma = 与首扫像素最接近的那个
+    st.sigma = META.equivalent_sigma.best_match_psnr.sigma;
+    $('sigma').value = st.sigma;
+    await render();
+  })();
+})();
+</script>
+</body>
+</html>

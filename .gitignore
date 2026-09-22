@@ -5,3 +5,12 @@
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Reference / working files not tracked
+fortune_sticks/stick.mp4
+fortune_sticks/_ref/
+
+# Generated output (reproducible via the scripts)
+progressiveJpeg/out/
+progressiveJpeg/out_frost*/
+camera_preview/samples/

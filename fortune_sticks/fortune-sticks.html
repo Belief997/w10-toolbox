@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>摇签筒动画 · 水墨手绘 · 可循环</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #e8dcc8; overflow: hidden; user-select: none;
+    background: #0a0f10;
+    display: flex;
+  }
+
+  /* ---- 舞台(深色墨底) ---- */
+  #stage {
+    flex: 1; min-width: 0; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(120% 120% at 50% 40%, #14201f 0%, #0a1010 60%, #030606 100%);
+  }
+  #cv {
+    background: #0a0f10; border-radius: 6px;
+    box-shadow: 0 18px 60px rgba(0,0,0,.6), 0 0 0 1px rgba(180,140,80,.12);
+    cursor: pointer;
+  }
+
+  /* ---- 右侧配置面板 ---- */
+  #panel {
+    width: 288px; flex: 0 0 288px; height: 100%;
+    background: rgba(30,18,20,.86); backdrop-filter: blur(14px);
+    border-left: 1px solid rgba(201,164,97,.15);
+    padding: 20px 18px; overflow-y: auto;
+    box-shadow: -8px 0 30px rgba(0,0,0,.4);
+    color: #f0e6d8;
+  }
+  #panel h1 { font-size: 15px; margin: 0 0 4px; font-weight: 700; letter-spacing: .02em; color: #c9a461; }
+  #panel .sub { font-size: 12px; opacity: .55; margin: 0 0 18px; }
+
+  .group { margin: 0 0 18px; }
+  .group > .gt {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    opacity: .45; margin: 0 0 9px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
+  .row label { font-size: 13px; opacity: .8; white-space: nowrap; flex: 0 0 auto; }
+  .row .val { margin-left: auto; font-family: ui-monospace, Consolas, monospace; font-size: 12px; opacity: .7; min-width: 44px; text-align: right; }
+
+  input[type=number] {
+    width: 74px; padding: 6px 8px; font-size: 13px; text-align: center;
+    border: 1px solid rgba(201,164,97,.2); border-radius: 8px;
+    background: rgba(0,0,0,.3); color: inherit;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  input[type=range] { flex: 1; min-width: 0; accent-color: #c1272d; }
+  select {
+    flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid rgba(201,164,97,.2);
+    border-radius: 8px; background: rgba(0,0,0,.3); color: inherit;
+  }
+  .times { opacity: .5; }
+
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .presets button {
+    flex: 1 1 auto; padding: 5px 6px; font-size: 11px; border-radius: 7px;
+    border: 1px solid rgba(201,164,97,.18); background: rgba(0,0,0,.25); color: inherit; cursor: pointer;
+    font-family: ui-monospace, Consolas, monospace; white-space: nowrap;
+  }
+  .presets button:hover { background: rgba(201,164,97,.10); }
+
+  button.primary {
+    width: 100%; padding: 12px; margin-top: 4px; font-size: 14px; font-weight: 600;
+    border: none; border-radius: 11px; cursor: pointer; color: #3a0a00;
+    background: linear-gradient(180deg, #e6a850, #c1272d);
+    box-shadow: 0 6px 18px rgba(193,39,45,.45);
+  }
+  button.primary:hover { filter: brightness(1.06); }
+  button.ghost {
+    width: 100%; padding: 11px; margin-top: 10px; font-size: 14px; font-weight: 600;
+    border: 1px solid rgba(201,164,97,.2); border-radius: 11px; cursor: pointer;
+    background: rgba(0,0,0,.25); color: inherit;
+  }
+  button.ghost:hover { background: rgba(201,164,97,.08); }
+  button:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; filter: none; }
+
+  #status {
+    margin-top: 14px; text-align: center; font-size: 13px; opacity: .75; min-height: 20px;
+  }
+  #status b { color: #c9a461; }
+
+  .hint { margin-top: 16px; font-size: 11px; opacity: .5; line-height: 1.7; }
+  kbd {
+    font-family: ui-monospace, monospace; font-size: 10px; padding: 1px 5px;
+    border: 1px solid rgba(201,164,97,.25); border-bottom-width: 2px; border-radius: 4px;
+    background: rgba(0,0,0,.3);
+  }
+  .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #c1272d; margin-right: 6px; animation: blink 1s steps(2, start) infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <aside id="panel">
+    <h1>摇签筒动画 · 水墨手绘</h1>
+    <p class="sub">深色氛围 · 2 秒无缝循环</p>
+
+    <div class="group">
+      <div class="gt">导出分辨率</div>
+      <div class="row">
+        <label>宽 × 高</label>
+        <input type="number" id="w" min="64" max="1920" step="1" value="480">
+        <span class="times">×</span>
+        <input type="number" id="h" min="64" max="1920" step="1" value="832">
+      </div>
+      <div class="presets">
+        <button data-res="480,832">480×832</button>
+        <button data-res="540,960">540×960</button>
+        <button data-res="720,1280">720×1280</button>
+        <button data-res="480,480">480²</button>
+        <button data-res="720,720">720²</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">动画</div>
+      <div class="row">
+        <label>单周期</label>
+        <input type="range" id="dur" min="1000" max="4000" step="100" value="2000">
+        <span class="val" id="durVal">2.0s</span>
+      </div>
+      <div class="row">
+        <label>摇动幅度</label>
+        <input type="range" id="amp" min="4" max="24" step="1" value="12">
+        <span class="val" id="ampVal">12°</span>
+      </div>
+      <div class="row">
+        <label>抖动烈度</label>
+        <input type="range" id="jitter" min="0" max="100" step="5" value="55">
+        <span class="val" id="jitterVal">55%</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">氛围</div>
+      <div class="row">
+        <label>光雾强度</label>
+        <input type="range" id="cloud" min="0" max="100" step="5" value="70">
+        <span class="val" id="cloudVal">70%</span>
+      </div>
+      <div class="row">
+        <label>运动线</label>
+        <input type="range" id="lines" min="0" max="100" step="5" value="45">
+        <span class="val" id="linesVal">45%</span>
+      </div>
+      <div class="row">
+        <label>星光粒子</label>
+        <input type="range" id="stars" min="0" max="100" step="5" value="40">
+        <span class="val" id="starsVal">40%</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">操作</div>
+      <button class="primary" id="playBtn">暂停</button>
+      <button class="ghost" id="recBtn"><span class="row-lbl">导出一个周期视频</span></button>
+      <button class="ghost" id="imgBtn">导出当前帧图片</button>
+      <div class="row" style="margin-top:12px">
+        <label>帧率</label>
+        <select id="fps"><option value="30">30 fps</option><option value="60" selected>60 fps</option></select>
+      </div>
+      <div id="status">循环播放中…</div>
+    </div>
+
+    <div class="hint">
+      · 水墨手绘风,深色氛围,发光签筒 + 竹签,起止相位相同、无缝循环。<br>
+      · 按 <kbd>空格</kbd> 暂停 / 恢复。点击画布同样切换。<br>
+      · 导出 <code>.webm</code> 恰好一个周期,首尾拼接可直接循环。
+    </div>
+  </aside>
+
+<script>
+"use strict";
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+
+  // ---------- 配置 ----------
+  const cfg = {
+    W: 480, H: 832,
+    dur: 2000,
+    ampDeg: 12,
+    jitter: 0.55,
+    cloud: 0.70,
+    lines: 0.45,
+    stars: 0.40,
+    fps: 60,
+  };
+
+  // ---------- 调色板(水墨手绘 · 深色底 · 发光暗红木) ----------
+  const COL = {
+    bgDeep:   '#050a0b',   // 最暗背景
+    bgMid:    '#0d1618',   // 中调
+    bgWarm:   '#1a1210',   // 中心暖色调
+    glowWarm: 'rgba(220,140,80,.28)',  // 中心暖光
+    glowRed:  'rgba(180,50,40,.22)',   // 签筒周围红光
+    tubeR0:   '#c94028',   // 木红 高光
+    tubeR1:   '#a02820',   // 木红 中
+    tubeR2:   '#5c1410',   // 木红 暗
+    tubeR3:   '#2a0806',   // 木红 极暗
+    tubeShine:'rgba(255,200,140,.35)',
+    gold:     '#b88a3e',   // 描金 中
+    goldHi:   '#e8bf6a',   // 描金 亮
+    goldLo:   '#4a3418',   // 描金 暗
+    stick:    '#c9a878',   // 竹签 主色
+    stickHi:  '#e8d0a0',   // 竹签 高光
+    stickDk:  '#5a4020',   // 竹签 暗节
+    stickTip: '#8a2418',   // 签头暗朱红
+    stickTipHi:'#c94028',
+    ink:      '#1a0a08',   // 墨色
+    inkSoft:  'rgba(15,8,5,.6)',
+    mist:     'rgba(200,140,80,.10)',   // 光雾
+    star:     'rgba(255,230,180,.9)',
+    line:     'rgba(220,180,120,.65)',
+  };
+
+  // ---------- 状态 ----------
+  let playing = true;
+  let phaseStart = performance.now();
+  let pausedPhase = 0;
+  let recording = false;
+
+  // 星光粒子(固定 seed,循环不变)
+  const stars = [];
+  const STAR_N = 28;
+  {
+    let s = 42;
+    const rnd = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+    for (let i = 0; i < STAR_N; i++) {
+      stars.push({
+        x: rnd(), y: rnd() * 0.6,             // 归一化 [0,1)
+        sizeBase: 1 + rnd() * 2.5,
+        phase: rnd() * Math.PI * 2,
+        speed: 0.7 + rnd() * 1.6,
+      });
+    }
+  }
+  // 云纹(固定 seed)
+  const clouds = [];
+  {
+    let s = 137;
+    const rnd = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+    for (let i = 0; i < 5; i++) {
+      clouds.push({
+        x: 0.1 + rnd() * 0.8,
+        y: 0.05 + rnd() * 0.35,
+        scale: 0.6 + rnd() * 0.9,
+        phase: rnd() * Math.PI * 2,
+        flip: rnd() < 0.5,
+      });
+    }
+  }
+  // 木牌签的固定初值(木牌等长等宽,顶端露出筒口 1/4,宽度 = 筒宽 / 5)
+  const sticks = [];
+  {
+    let s = 7;
+    const rnd = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+    const N = 5;
+    for (let i = 0; i < N; i++) {
+      const t = (i - (N - 1) / 2) / ((N - 1) / 2 || 1);  // -1..1
+      sticks.push({
+        // 横向偏移:木牌宽 = tubeW/5,5 根之间保持轻微错开,略有重叠
+        xOff: t * 0.32,
+        // 初始静态倾斜(角度)—— 每根方向不同,轻微散开
+        tilt: t * 6 + (rnd() - 0.5) * 4,
+        // 摇动相位(用来让相邻签有先后差,产生碰撞节奏)
+        phase: rnd() * Math.PI * 2,
+        // 每根对摇动的响应强度(轻微差异,视觉上不呆板)
+        ampScale: 0.85 + rnd() * 0.30,
+        // 前后景层(用于遮挡关系,不影响长度)
+        z: rnd() < 0.5 ? -1 : 1,
+      });
+    }
+    sticks.sort((a, b) => a.xOff - b.xOff);
+  }
+  // 运动线的锚点(左右两侧)
+  const motionLines = [
+    { side: -1, y: 0.35, len: 0.10, phase: 0.0 },
+    { side: -1, y: 0.50, len: 0.14, phase: 0.5 },
+    { side: -1, y: 0.65, len: 0.12, phase: 0.25 },
+    { side:  1, y: 0.38, len: 0.11, phase: 0.75 },
+    { side:  1, y: 0.53, len: 0.15, phase: 0.0 },
+    { side:  1, y: 0.68, len: 0.10, phase: 0.5 },
+  ];
+
+  // ---------- 尺寸 ----------
+  function applySize() {
+    cfg.W = clampInt(document.getElementById('w').value, 64, 1920, 480);
+    cfg.H = clampInt(document.getElementById('h').value, 64, 1920, 480);
+    document.getElementById('w').value = cfg.W;
+    document.getElementById('h').value = cfg.H;
+    cv.width = cfg.W;
+    cv.height = cfg.H;
+    fitDisplay();
+  }
+  function fitDisplay() {
+    const box = Math.min(window.innerWidth - 340, window.innerHeight - 40) * 0.94;
+    const ratio = cfg.W / cfg.H;
+    let dispH = Math.min(box, window.innerHeight - 40);
+    let dispW = dispH * ratio;
+    const maxW = window.innerWidth - 340;
+    if (dispW > maxW) { dispW = maxW; dispH = dispW / ratio; }
+    cv.style.width  = dispW + 'px';
+    cv.style.height = dispH + 'px';
+  }
+  function clampInt(v, lo, hi, dflt) {
+    v = Math.round(+v); if (!isFinite(v)) v = dflt;
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  // ---------- 相位 ----------
+  function currentPhase(now) {
+    if (!playing) return pausedPhase;
+    const t = (now - phaseStart) % cfg.dur;
+    return t / cfg.dur;
+  }
+
+  // ---------- 绘制辅助 ----------
+  // 描边 + 填充(卡通粗描边)
+  function strokeFill(fill, stroke, w) {
+    ctx.fillStyle = fill;
+    ctx.fill();
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = w;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+  }
+
+  // 圆角矩形(签筒外壁的一半横截面)
+  function roundRectPath(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  // 光雾/烟氲(取代硬云纹,做水墨氤氲感)
+  function drawCloud(cx, cy, scale, opacity, flip) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(flip ? -scale : scale, scale);
+    ctx.globalAlpha = opacity;
+    // 多层柔化径向:像烟一样弥散
+    const layers = [
+      { r: 60, c: 'rgba(200,140,80,.28)' },
+      { r: 40, c: 'rgba(220,160,100,.22)' },
+      { r: 24, c: 'rgba(240,190,130,.18)' },
+    ];
+    for (const L of layers) {
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, L.r);
+      g.addColorStop(0, L.c);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, L.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // 一根签 = 短木牌(在签筒本地坐标,y 向上为正,y=0 为筒底)
+  // 支点 = 筒底附近,木牌在筒里被"甩"起来相互碰撞;卡通风:平涂 + 粗描边
+  function drawStick(s, phase, sway, jitterAmp, tubeW, tubeH) {
+    ctx.save();
+
+    // 动态倾斜:静态错位 + 惯性滞后 + 相邻签自身抖动(碰撞感)
+    const twoPI = Math.PI * 2;
+    const inertia = -Math.cos(twoPI * phase) * cfg.ampDeg * 0.55 * s.ampScale;
+    const wobble  = Math.sin(twoPI * phase + s.phase) * jitterAmp * s.ampScale;
+    const localAngleDeg = s.tilt + inertia + wobble;
+    const angle = localAngleDeg * Math.PI / 180;
+
+    // 支点:筒底附近,木牌根插在筒内底部
+    const pivotX = s.xOff * tubeW * 0.42;
+    const pivotY = -tubeH * 0.10;
+    ctx.translate(pivotX, pivotY);
+    ctx.rotate(angle);
+
+    // 木牌尺寸:全部一致 —— 顶端只露出筒口 1/4,宽度 = 筒宽 / 5
+    // 支点在筒底 0.10 处,筒口在 -tubeH(即距支点 tubeH*0.90),
+    // 想让顶端露出筒外 tubeH*0.25 → 木牌长 = 0.90*tubeH + 0.25*tubeH = 1.15*tubeH
+    const sLen = tubeH * 1.15;
+    const sW   = tubeW / 5;
+    const rTop = sW * 0.28;   // 顶部圆角(卡通木牌感)
+    const rBot = sW * 0.22;   // 底部圆角
+
+    ctx.lineJoin = 'round';
+    ctx.lineCap  = 'round';
+
+    // ---- 卡通粗描边 ----
+    const strokeW = Math.max(2, tubeW * 0.014);
+    const inkCol  = '#2b1a0d';
+
+    // ---- 木牌主体:圆角矩形,平涂卡通木黄色 ----
+    ctx.beginPath();
+    roundRectPath(-sW / 2, -sLen, sW, sLen, Math.min(rTop, rBot));
+    // 顶部与底部圆角实际相同(用统一 r 更稳),视觉上是同款木牌
+    ctx.fillStyle = '#e6b96a';   // 卡通木黄(平涂)
+    ctx.fill();
+    ctx.strokeStyle = inkCol;
+    ctx.lineWidth = strokeW;
+    ctx.stroke();
+
+    // ---- 左侧竖长条:卡通亮部平涂色块(占宽约 30%) ----
+    ctx.save();
+    ctx.beginPath();
+    roundRectPath(-sW / 2, -sLen, sW, sLen, Math.min(rTop, rBot));
+    ctx.clip();
+    ctx.fillStyle = '#f5d38a';   // 亮部
+    ctx.fillRect(-sW / 2, -sLen, sW * 0.30, sLen);
+    // 右侧窄暗条(增加立体感,仍是卡通平涂)
+    ctx.fillStyle = 'rgba(120,70,25,.28)';
+    ctx.fillRect(sW * 0.18, -sLen, sW * 0.32, sLen);
+    ctx.restore();
+
+    // ---- 木牌顶端小色带(卡通木牌常见的"帽")----
+    ctx.beginPath();
+    const capH = sW * 0.55;
+    roundRectPath(-sW / 2, -sLen, sW, capH, Math.min(rTop, rBot));
+    ctx.fillStyle = '#c94028';   // 朱红色帽
+    ctx.fill();
+    // 与主体的分割线
+    ctx.beginPath();
+    ctx.moveTo(-sW / 2 + strokeW * 0.4, -sLen + capH);
+    ctx.lineTo( sW / 2 - strokeW * 0.4, -sLen + capH);
+    ctx.strokeStyle = inkCol;
+    ctx.lineWidth = strokeW * 0.75;
+    ctx.stroke();
+
+    // ---- 外轮廓再描一遍(避免被色带压掉)----
+    ctx.beginPath();
+    roundRectPath(-sW / 2, -sLen, sW, sLen, Math.min(rTop, rBot));
+    ctx.strokeStyle = inkCol;
+    ctx.lineWidth = strokeW;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // 画签筒(位于本地坐标原点,轴向上,签筒中心 = 原点向上一半高度)
+  function drawTube(tubeW, tubeH) {
+    const halfW = tubeW / 2;
+    const rimH = tubeH * 0.07;    // 顶部金环高度
+    const baseH = tubeH * 0.08;   // 底部金环高度
+    const bodyTop = -tubeH + rimH;
+    const bodyBot = -baseH;
+
+    // 外围一层柔和红光(自发光)
+    ctx.save();
+    const glow = ctx.createRadialGradient(0, -tubeH * 0.5, tubeW * 0.4,
+                                          0, -tubeH * 0.5, tubeW * 1.4);
+    glow.addColorStop(0, 'rgba(200,60,40,.35)');
+    glow.addColorStop(0.5, 'rgba(120,30,20,.15)');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(-tubeW * 1.4, -tubeH * 1.9, tubeW * 2.8, tubeH * 2.8);
+    ctx.restore();
+
+    // 主体填充(卡通:平涂 + 一条亮部)
+    ctx.save();
+    ctx.beginPath();
+    roundRectPath(-halfW, -tubeH, tubeW, tubeH, tubeW * 0.09);
+    ctx.clip();
+
+    // 底色:卡通木红,平涂
+    ctx.fillStyle = COL.tubeR1;
+    ctx.fillRect(-halfW, -tubeH, tubeW, tubeH);
+
+    // 左侧一条亮部(平涂,卡通高光)
+    ctx.fillStyle = COL.tubeR0;
+    ctx.fillRect(-halfW, -tubeH, tubeW * 0.22, tubeH);
+
+    // 右侧一条暗部(平涂,卡通阴影)
+    ctx.fillStyle = COL.tubeR2;
+    ctx.fillRect(halfW - tubeW * 0.18, -tubeH, tubeW * 0.18, tubeH);
+
+    ctx.restore();
+
+    // 主体粗描边(卡通)
+    ctx.beginPath();
+    roundRectPath(-halfW, -tubeH, tubeW, tubeH, tubeW * 0.09);
+    ctx.strokeStyle = COL.ink;
+    ctx.lineWidth = Math.max(2, tubeW * 0.02);
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // 顶部金环(卡通平涂 + 一条高光)
+    ctx.save();
+    ctx.beginPath();
+    roundRectPath(-halfW, -tubeH, tubeW, rimH, tubeW * 0.09);
+    ctx.clip();
+    ctx.fillStyle = COL.gold;
+    ctx.fillRect(-halfW, -tubeH, tubeW, rimH);
+    ctx.fillStyle = COL.goldHi;
+    ctx.fillRect(-halfW, -tubeH + rimH * 0.15, tubeW, rimH * 0.28);   // 卡通高光条
+    ctx.restore();
+    // 顶环与筒身的分界线(卡通粗黑线)
+    ctx.beginPath();
+    ctx.moveTo(-halfW + tubeW * 0.02, -tubeH + rimH);
+    ctx.lineTo( halfW - tubeW * 0.02, -tubeH + rimH);
+    ctx.strokeStyle = COL.ink;
+    ctx.lineWidth = Math.max(2, tubeW * 0.014);
+    ctx.stroke();
+
+    // 底部金环
+    ctx.save();
+    ctx.beginPath();
+    roundRectPath(-halfW, bodyBot, tubeW, baseH, tubeW * 0.09);
+    ctx.clip();
+    ctx.fillStyle = COL.gold;
+    ctx.fillRect(-halfW, bodyBot, tubeW, baseH);
+    ctx.fillStyle = COL.goldHi;
+    ctx.fillRect(-halfW, bodyBot + baseH * 0.15, tubeW, baseH * 0.25);
+    ctx.restore();
+    ctx.beginPath();
+    ctx.moveTo(-halfW + tubeW * 0.02, bodyBot);
+    ctx.lineTo( halfW - tubeW * 0.02, bodyBot);
+    ctx.strokeStyle = COL.ink;
+    ctx.lineWidth = Math.max(2, tubeW * 0.014);
+    ctx.stroke();
+
+    // 顶口内暗:卡通式简洁椭圆,深色平涂 + 粗描边
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(0, -tubeH + rimH * 0.35, halfW * 0.85, rimH * 0.32, 0, 0, Math.PI * 2);
+    ctx.fillStyle = COL.tubeR3;
+    ctx.fill();
+    ctx.strokeStyle = COL.ink;
+    ctx.lineWidth = Math.max(2, tubeW * 0.014);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 地面柔光辉/投影(签筒下方,深色背景上的暖色微光)
+  function drawShadow(cx, groundY, tubeW, sway) {
+    ctx.save();
+    // 摇动时投影中心跟着偏
+    const off = Math.sin(sway * Math.PI / 180) * tubeW * 0.20;
+    ctx.translate(cx + off, groundY);
+    // 投影随摇动稍稍拉伸
+    const stretch = 1 + Math.abs(Math.sin(sway * Math.PI / 180)) * 0.12;
+
+    // 底部两层:先来一层暖光辉(像光在筒底聚集)
+    const glowR = tubeW * 1.1 * stretch;
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+    g.addColorStop(0, 'rgba(200,110,60,.35)');
+    g.addColorStop(0.35, 'rgba(140,60,30,.18)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, glowR, glowR * 0.35, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 中心一层贴地暗影(压在光辉之上,形成"筒和地"的接触)
+    const shR = tubeW * 0.55 * stretch;
+    const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, shR);
+    sg.addColorStop(0, 'rgba(0,0,0,.55)');
+    sg.addColorStop(0.7, 'rgba(0,0,0,.20)');
+    sg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, shR, shR * 0.28, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 背景 —— 深色墨底 + 中心暖光晕 + 光雾氤氲
+  function drawBackground(W, H, phase) {
+    // 深色底(带一点暖色中心)
+    ctx.fillStyle = COL.bgDeep;
+    ctx.fillRect(0, 0, W, H);
+
+    // 中心大范围暖色光晕(像画面里蜡烛/香火的光)
+    const cx = W * 0.5, cy = H * 0.58;
+    const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.75);
+    rg.addColorStop(0.0, 'rgba(180,110,60,.35)');
+    rg.addColorStop(0.20, 'rgba(120,50,30,.22)');
+    rg.addColorStop(0.55, 'rgba(30,20,15,.10)');
+    rg.addColorStop(1.0, 'rgba(0,0,0,0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(0, 0, W, H);
+
+    // 底部一层墨色渐变,压暗
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, 'rgba(0,0,0,.35)');
+    bg.addColorStop(0.45, 'rgba(0,0,0,0)');
+    bg.addColorStop(1, 'rgba(0,0,0,.55)');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // 顶部一层墨色渐变(暗角/晕影效果)
+    const vg = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.3,
+                                        cx, cy, Math.max(W, H) * 0.85);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,.75)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+
+    // 光雾/烟氲装饰(受 cfg.cloud 强度调节)
+    if (cfg.cloud > 0.02) {
+      const opacity = cfg.cloud;
+      for (const c of clouds) {
+        const x = c.x * W;
+        const y = c.y * H;
+        // 光雾随相位轻微飘动
+        const dx = Math.sin(2 * Math.PI * phase + c.phase) * 4;
+        const dy = Math.cos(2 * Math.PI * phase + c.phase) * 3;
+        drawCloud(x + dx, y + dy, c.scale * (W / 400), opacity, c.flip);
+      }
+    }
+  }
+
+  // 星光粒子:围绕签筒闪烁
+  function drawStars(cx, cy, tubeW, phase) {
+    if (cfg.stars < 0.02) return;
+    ctx.save();
+    const radius = tubeW * 1.4;
+    for (const s of stars) {
+      // 每颗星自己相位内闪烁:0..1..0 的三角波
+      const t = (phase * s.speed + s.phase / (2 * Math.PI)) % 1;
+      const twinkle = 0.5 - 0.5 * Math.cos(2 * Math.PI * t);
+      if (twinkle < 0.15) continue;
+      const px = cx + (s.x * 2 - 1) * radius;
+      const py = cy - tubeW * 0.9 + (s.y * 2 - 1) * radius * 0.6;
+      const size = s.sizeBase * (0.6 + twinkle * 1.4);
+      ctx.globalAlpha = cfg.stars * (0.3 + twinkle * 0.7);
+      // 四芒星
+      ctx.fillStyle = COL.star;
+      ctx.beginPath();
+      ctx.moveTo(px, py - size * 2);
+      ctx.lineTo(px + size * 0.6, py - size * 0.6);
+      ctx.lineTo(px + size * 2, py);
+      ctx.lineTo(px + size * 0.6, py + size * 0.6);
+      ctx.lineTo(px, py + size * 2);
+      ctx.lineTo(px - size * 0.6, py + size * 0.6);
+      ctx.lineTo(px - size * 2, py);
+      ctx.lineTo(px - size * 0.6, py - size * 0.6);
+      ctx.closePath();
+      ctx.fill();
+      // 星芯亮点
+      ctx.globalAlpha = cfg.stars * twinkle;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(px, py, size * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // 运动线(极限位置时闪现的线条)
+  function drawMotionLines(cx, cy, tubeW, phase, sway) {
+    if (cfg.lines < 0.02) return;
+    // 只在两个极限位置附近亮起(sin(2πp)≈±1 时)
+    const s = Math.sin(2 * Math.PI * phase);
+    const strength = Math.pow(Math.abs(s), 3);   // 只在 |sin|≈1 附近
+    if (strength < 0.15) return;
+
+    const sign = Math.sign(s) || 1;
+
+    ctx.save();
+    ctx.strokeStyle = COL.line;
+    for (const ml of motionLines) {
+      // 只画与"倾斜方向相反"那一侧的线,更符合物理直觉
+      if (ml.side * sign > 0) continue;
+      const yy = cy - tubeW * 0.9 + (ml.y - 0.5) * tubeW * 1.6;
+      const x0 = cx + ml.side * (tubeW * 0.55 + tubeW * 0.05);
+      const x1 = cx + ml.side * (tubeW * 0.55 + tubeW * 0.05 + tubeW * ml.len);
+      ctx.globalAlpha = cfg.lines * strength * 0.9;
+      ctx.lineWidth = Math.max(2, tubeW * 0.02);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x0, yy);
+      ctx.lineTo(x1, yy);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ---------- 主绘制 ----------
+  function render(now) {
+    requestAnimationFrame(render);
+
+    const W = cfg.W, H = cfg.H;
+    const phase = currentPhase(now);
+
+    // 背景
+    drawBackground(W, H, phase);
+
+    // 签筒尺寸与位置(竖版参考:签筒略窄且居中偏下,签向上延伸)
+    const shorter = Math.min(W, H);
+    const tubeW = shorter * 0.30;
+    const tubeH = tubeW * 1.70;
+    const cx = W * 0.5;
+    // groundY 是画布上 “地面” 的 y 坐标(下移让上方留出签的空间)
+    const groundY = H * 0.86;
+
+    // 摇动姿态(sin 主 + cos 副 + 微上下,起止都是 0 → 无缝)
+    const a = Math.PI * 2 * phase;
+    const sway = Math.sin(a) * cfg.ampDeg;            // 签筒左右摇动(度)
+    const bob = (1 - Math.cos(a * 2)) * -0.8;         // 上下小浮动(像素量级)
+    const swayRad = sway * Math.PI / 180;
+
+    // 星光(在签筒变换外先画,处于"筒后"层)
+    drawStars(cx, groundY - tubeH * 0.5, tubeW, phase);
+
+    // 投影(在签筒变换外画,处于筒底部)
+    drawShadow(cx, groundY, tubeW, sway);
+
+    // 签筒 + 竹签整体做变换:围绕筒底旋转
+    ctx.save();
+    ctx.translate(cx, groundY + bob);
+    ctx.rotate(swayRad);
+
+    // 先画竹签(可以在筒的后面透出,但整体是在筒的前面渲染;为避免遮挡感,分两次:
+    // 后排竹签:xOff 靠近中间的 → 画在筒后
+    // 前排竹签:同层筒前
+    // 简化:所有竹签画在筒后(先),再叠一层筒。这样竹签底端被筒挡住,顶端露出来。
+    const jitterAmp = cfg.jitter * (cfg.ampDeg * 0.6);
+    for (const s of sticks) {
+      drawStick(s, phase, sway, jitterAmp, tubeW, tubeH);
+    }
+
+    // 再画签筒(遮住签的下段)
+    drawTube(tubeW, tubeH);
+
+    ctx.restore();
+
+    // 运动线(在最上层,让"甩动"感更强)
+    drawMotionLines(cx, groundY - tubeH * 0.5, tubeW, phase, sway);
+  }
+
+  // ---------- 播放/暂停 ----------
+  function togglePlay() {
+    if (recording) return;
+    if (playing) {
+      pausedPhase = currentPhase(performance.now());
+      playing = false;
+      document.getElementById('playBtn').textContent = '播放';
+      document.getElementById('status').textContent = '已暂停';
+    } else {
+      phaseStart = performance.now() - pausedPhase * cfg.dur;
+      playing = true;
+      document.getElementById('playBtn').textContent = '暂停';
+      document.getElementById('status').textContent = '循环播放中…';
+    }
+  }
+
+  // ---------- 视频导出 ----------
+  function pickMime() {
+    const list = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+    for (const t of list) if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+    return '';
+  }
+  function exportVideo() {
+    if (recording) return;
+    if (!window.MediaRecorder || !cv.captureStream) {
+      alert('当前浏览器不支持 MediaRecorder 录制,请用 Chrome / Edge。'); return;
+    }
+    const mime = pickMime();
+    const stream = cv.captureStream(cfg.fps);
+    const chunks = [];
+    let rec;
+    try {
+      rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8_000_000 } : undefined);
+    } catch (e) { alert('无法创建录制器:' + e.message); return; }
+
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      const type = (mime || 'video/webm').split(';')[0];
+      const ext  = type.includes('mp4') ? 'mp4' : 'webm';
+      const blob = new Blob(chunks, { type });
+      const url  = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `fortune-sticks-${cfg.W}x${cfg.H}.${ext}`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      recording = false; setControls(true); recBtnLabel('导出一个周期视频');
+      document.getElementById('status').textContent = '循环播放中…';
+    };
+
+    recording = true; setControls(false); recBtnLabel('<span class="rec-dot"></span>录制中…');
+    document.getElementById('status').innerHTML = '<span class="rec-dot"></span>正在录制一个周期…';
+
+    playing = true;
+    phaseStart = performance.now();
+    rec.start();
+    setTimeout(() => { try { rec.stop(); } catch (_) {} }, cfg.dur + 40);
+  }
+  function recBtnLabel(html) { document.querySelector('#recBtn .row-lbl').innerHTML = html; }
+  function setControls(on) {
+    ['playBtn', 'recBtn', 'imgBtn', 'w', 'h', 'dur', 'amp', 'jitter', 'cloud', 'lines', 'stars', 'fps']
+      .forEach(id => document.getElementById(id).disabled = !on);
+  }
+
+  // ---------- 图片导出 ----------
+  function exportImage() {
+    if (recording) return;
+    const save = (url, revoke) => {
+      const a = document.createElement('a');
+      a.href = url; a.download = `fortune-sticks-${cfg.W}x${cfg.H}.png`; a.click();
+      if (revoke) setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    if (cv.toBlob) {
+      cv.toBlob(b => b ? save(URL.createObjectURL(b), true) : alert('导出图片失败'), 'image/png');
+    } else {
+      save(cv.toDataURL('image/png'), false);
+    }
+  }
+
+  // ---------- 事件 ----------
+  cv.addEventListener('click', togglePlay);
+  document.getElementById('playBtn').addEventListener('click', togglePlay);
+  document.getElementById('recBtn').addEventListener('click', exportVideo);
+  document.getElementById('imgBtn').addEventListener('click', exportImage);
+  window.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); togglePlay(); } });
+
+  document.getElementById('w').addEventListener('change', applySize);
+  document.getElementById('h').addEventListener('change', applySize);
+  document.querySelectorAll('.presets button').forEach(b => {
+    b.addEventListener('click', () => {
+      const [w, h] = b.dataset.res.split(',');
+      document.getElementById('w').value = w; document.getElementById('h').value = h;
+      applySize();
+    });
+  });
+
+  const bind = (id, valId, fmt, set) => {
+    const el = document.getElementById(id), out = document.getElementById(valId);
+    const upd = () => { set(+el.value); out.textContent = fmt(+el.value); };
+    el.addEventListener('input', upd); upd();
+  };
+  bind('dur', 'durVal', v => (v / 1000).toFixed(1) + 's', v => {
+    const p = currentPhase(performance.now());
+    cfg.dur = v;
+    if (playing) phaseStart = performance.now() - p * cfg.dur;
+    else pausedPhase = p;
+  });
+  bind('amp',    'ampVal',    v => v + '°', v => cfg.ampDeg = v);
+  bind('jitter', 'jitterVal', v => v + '%', v => cfg.jitter = v / 100);
+  bind('cloud',  'cloudVal',  v => v + '%', v => cfg.cloud = v / 100);
+  bind('lines',  'linesVal',  v => v + '%', v => cfg.lines = v / 100);
+  bind('stars',  'starsVal',  v => v + '%', v => cfg.stars = v / 100);
+  document.getElementById('fps').addEventListener('change', e => cfg.fps = +e.target.value);
+  window.addEventListener('resize', fitDisplay);
+
+  // ---------- 启动 ----------
+  applySize();
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
