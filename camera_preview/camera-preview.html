@@ -119,6 +119,23 @@
   #guesses button { font-family: ui-monospace, Consolas, monospace; }
   #sizeInfo { margin-top: 7px; font: 11.5px/1.6 ui-monospace, Consolas, monospace; color: #8b97a8; }
 
+  /* 预处理:诊断信息 + hex 预览 */
+  #preInfo { margin-top: 7px; font: 11.5px/1.6 ui-monospace, Consolas, monospace; color: #8b97a8; }
+  #preInfo .note { display: block; }
+  #preInfo .hex { color: #7fd1ff; word-break: break-all; }
+  #preAdv.hide { display: none; }
+  #preAdv { border-top: 1px dashed #2b323d; margin-top: 8px; padding-top: 6px; }
+  label.row.off { display: none; }
+
+  /* 文件头信息表 */
+  #hdrBox.hide { display: none; }
+  #hdrTable { width: 100%; border-collapse: collapse;
+              font: 11.5px/1.55 ui-monospace, Consolas, monospace; }
+  #hdrTable td { padding: 1px 0; vertical-align: top; }
+  #hdrTable td.k { color: #8fa3bd; width: 92px; white-space: nowrap; }
+  #hdrTable td.v { color: #dce7f5; word-break: break-all; }
+  #hdrTable td.v .tag { font-size: 10.5px; margin-left: 5px; }
+
   /* 通道/直方图 */
   #histo { width: 100%; height: 62px; display: block; background: #0f1318;
            border: 1px solid #2b323d; border-radius: 5px; margin-top: 6px; }
@@ -152,6 +169,7 @@
 <div id="panel">
   <h1>Camera Dump 预览</h1>
   <div class="sub">把 camera 模块 dump 出来的裸数据按指定格式/尺寸还原成图像。
+    串口工具抓的十六进制文本也能直接拖进来,自带头部的 dump 会自动套用参数。
     纯本地运行,文件不会上传。</div>
 
   <fieldset>
@@ -160,6 +178,69 @@
     <button class="act" id="pick">选择文件…</button>
     <div class="hint" id="fileInfo">未选择文件</div>
     <div id="fileList"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>预处理</legend>
+    <label class="row"><span>数据类型</span><select id="profile"></select></label>
+    <div class="hint" id="profileHint"></div>
+    <div class="btnrow">
+      <button class="mini" id="preMore">高级…</button>
+      <button class="mini" id="preReset">复位</button>
+    </div>
+    <div id="preAdv" class="hide">
+      <label class="row"><span>文本解析</span><select id="parser"></select></label>
+      <div class="hint" id="parserHint"></div>
+      <label class="row" id="rowCustomRe"><span>抽取正则</span>
+        <input type="text" id="customRe" placeholder="([0-9A-Fa-f]{2})"></label>
+      <label class="row"><span>位变换</span><select id="transform">
+        <option value="auto">自动(按容器头 / 数据类型)</option>
+      </select></label>
+      <div class="hint" id="transformHint"></div>
+      <label class="row" id="rowPhase"><span>字节相位</span>
+        <select id="transformPhase">
+          <option value="auto">自动</option>
+          <option value="0">0 · 从第 1 字节起配对</option>
+          <option value="1">1 · 跳过第 1 字节</option>
+        </select></label>
+      <label class="row"><span>剥行前缀</span>
+        <select id="stripPrefix">
+          <option value="auto">自动(时间戳 / TAG)</option>
+          <option value="off">不剥</option>
+        </select></label>
+      <label class="row"><span>只留匹配</span>
+        <input type="text" id="keepRe" placeholder="正则,留空 = 全要"></label>
+      <label class="row"><span>丢弃匹配</span>
+        <input type="text" id="dropRe" placeholder="正则,留空 = 不丢"></label>
+      <div class="btnrow">
+        <button class="mini" id="slipBtn" title="RFC 1055:0xC0 分帧,0xDB 转义">SLIP 解帧</button>
+        <button class="mini" id="swapBtn" title="每个 16bit 字的两个字节互换">16bit 字节交换</button>
+        <button class="mini" id="resyncBtn"
+          title="串口丢字节会让后面的像素整体错开半个像素(画面斜着撕开)。利用填充位做同步标志找回对齐">丢字节重同步</button>
+      </div>
+      <label class="row"><span>帧切分</span>
+        <select id="frameMode">
+          <option value="none">不切(整个文件一帧)</option>
+          <option value="size">按固定大小</option>
+          <option value="jpeg">按 JPEG 魔数 (FFD8FF…FFD9)</option>
+          <option value="magic">按自定义魔数</option>
+        </select></label>
+      <label class="row" id="rowFrameSize"><span>帧大小</span>
+        <input type="number" id="frameSize" min="1" step="1" placeholder="字节">
+        <button class="mini" id="frameFromFmt" title="按当前格式与宽高算一帧字节数">按格式</button>
+      </label>
+      <label class="row" id="rowFrameStart"><span>起始魔数</span>
+        <input type="text" id="frameStart" placeholder="如 AA 55"></label>
+      <label class="row" id="rowFrameEnd"><span>结束魔数</span>
+        <input type="text" id="frameEnd" placeholder="留空 = 到下一个起始"></label>
+    </div>
+    <div id="preInfo"></div>
+  </fieldset>
+
+  <fieldset id="hdrBox" class="hide">
+    <legend>文件头信息</legend>
+    <table id="hdrTable"></table>
+    <div class="hint" id="hdrExtra"></div>
   </fieldset>
 
   <fieldset>
@@ -270,11 +351,12 @@
 
   <div class="hint">
     快捷键:<b>滚轮</b> 缩放 · <b>拖拽</b> 平移 · <b>F</b> 适应 · <b>1</b> 原始比例 ·
-    <b>Z</b> 放大镜 · <b>G</b> 网格 · <b>[ ]</b> 切上/下一个文件
+    <b>Z</b> 放大镜 · <b>G</b> 网格 · <b>[ ]</b> 切上/下一个文件(或帧)
   </div>
 </div>
 
 <script src="decoders.js"></script>
+<script src="preprocess.js"></script>
 <script src="camera-preview.js"></script>
 </body>
 </html>

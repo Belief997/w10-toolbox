@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自制应援效果 · web 预览</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #e9eaee; overflow: hidden; user-select: none;
+    background: #15161a;
+    display: flex;
+  }
+
+  /* ---- 舞台 ---- */
+  #stage {
+    flex: 1; min-width: 0; height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: 24px;
+    background: radial-gradient(120% 120% at 50% 35%, #23252c 0%, #181a1f 70%, #121317 100%);
+  }
+  /* 应援牌外形:圆屏 —— 机身也做成圆环,边框即「屏占比」之外的那圈 */
+  #badge {
+    position: relative; padding: 14px; border-radius: 50%;
+    background: linear-gradient(180deg, #33363f, #1d1f25);
+    box-shadow: 0 22px 60px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06),
+                inset 0 1px 0 rgba(255,255,255,.1);
+  }
+  /* 画布本身已把内容裁成内切圆、圆外留透明;这里再给 CSS 圆角,
+     让抗锯齿边缘压在机身底色上而不是硬边 */
+  #cv {
+    display: block; border-radius: 50%; background: #000;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+  }
+  #meta {
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+    opacity: .4; letter-spacing: .04em; text-align: center; line-height: 1.8;
+  }
+  /* 溢出警告要能从 .4 的整体透明度里跳出来 */
+  #meta .warn { color: #ffb020; opacity: 1; font-weight: 600; }
+  #meta:has(.warn) { opacity: .75; }
+
+  /* ---- 右侧配置面板 ---- */
+  #panel {
+    width: 300px; flex: 0 0 300px; height: 100%;
+    background: rgba(26,28,33,.92); backdrop-filter: blur(14px);
+    border-left: 1px solid rgba(255,255,255,.07);
+    padding: 20px 18px; overflow-y: auto;
+  }
+  #panel h1 { font-size: 15px; margin: 0 0 4px; font-weight: 700; letter-spacing: .02em; }
+  #panel .sub { font-size: 12px; opacity: .45; margin: 0 0 18px; line-height: 1.6; }
+
+  .group { margin: 0 0 18px; }
+  .group > .gt {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    opacity: .4; margin: 0 0 9px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
+  .row label { font-size: 13px; opacity: .75; white-space: nowrap; flex: 0 0 auto; }
+  .row .val {
+    margin-left: auto; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px; opacity: .6; min-width: 50px; text-align: right;
+  }
+
+  textarea {
+    width: 100%; height: 76px; resize: vertical; padding: 8px 10px;
+    font-size: 13px; line-height: 1.5; font-family: inherit;
+    border: 1px solid rgba(255,255,255,.14); border-radius: 9px;
+    background: #101115; color: inherit;
+  }
+  input[type=range] { flex: 1; min-width: 0; accent-color: #ff2d55; }
+  input[type=color] {
+    width: 42px; height: 28px; padding: 0; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.16); border-radius: 7px;
+    background: transparent;
+  }
+  input[type=file] { display: none; }
+  select {
+    flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid rgba(255,255,255,.14);
+    border-radius: 8px; background: #101115; color: inherit;
+  }
+
+  /* 效果选择用分段按钮,一眼看全所有枚举 */
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button {
+    flex: 1 1 auto; padding: 7px 8px; font-size: 12px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.13); background: #101115; color: inherit;
+    cursor: pointer; white-space: nowrap;
+  }
+  .seg button:hover { background: #1b1d23; }
+  .seg button.on {
+    background: linear-gradient(180deg, #ff4d6d, #ff2d55);
+    border-color: transparent; color: #fff; font-weight: 600;
+  }
+  .seg button .pd {
+    display: block; font-size: 10px; opacity: .6; font-family: ui-monospace, Consolas, monospace;
+  }
+
+  button.ghost {
+    width: 100%; padding: 10px; margin-top: 8px; font-size: 13px; font-weight: 600;
+    border: 1px solid rgba(255,255,255,.14); border-radius: 10px; cursor: pointer;
+    background: #101115; color: inherit;
+  }
+  button.ghost:hover { background: #1b1d23; }
+  .half { display: flex; gap: 8px; }
+  .half button.ghost { margin-top: 8px; }
+
+  .imgname {
+    margin-top: 8px; font-size: 10px; opacity: .45; text-align: center;
+    font-family: ui-monospace, Consolas, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .hint { margin-top: 16px; font-size: 11px; opacity: .42; line-height: 1.8; }
+  .hint code { font-family: ui-monospace, Consolas, monospace; opacity: .9; }
+  kbd {
+    font-family: ui-monospace, monospace; font-size: 10px; padding: 1px 5px;
+    border: 1px solid rgba(255,255,255,.22); border-bottom-width: 2px;
+    border-radius: 4px; background: #1b1d23;
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="badge"><canvas id="cv"></canvas></div>
+    <div id="meta"></div>
+  </div>
+
+  <aside id="panel">
+    <h1>自制应援效果</h1>
+    <p class="sub">微信小程序编辑页预览的 web 移植 · 24fps · 运动按 466×466 定义</p>
+
+    <div class="group">
+      <div class="gt">文字</div>
+      <textarea id="text" spellcheck="false">一起
+为你
+发光</textarea>
+      <div class="seg" id="textLayout" style="margin-top:8px"></div>
+      <div class="row">
+        <label>字号</label>
+        <input type="range" id="fontSize" min="24" max="200" step="2" value="96">
+        <span class="val" id="fontSizeVal">96</span>
+      </div>
+      <div class="row">
+        <label>字色</label>
+        <input type="color" id="fontColor" value="#ffffff">
+        <span class="val" id="inkVal">#ffffff</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">textFx 文字效果</div>
+      <div class="seg" id="textFx"></div>
+    </div>
+
+    <div class="group">
+      <div class="gt">bgFx 背景效果</div>
+      <div class="seg" id="bgFx"></div>
+      <div class="row">
+        <label>速度</label>
+        <input type="range" id="speed" min="0.25" max="3" step="0.05" value="1">
+        <span class="val" id="speedVal">1.00×</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">背景内容</div>
+      <div class="row">
+        <label>底色</label>
+        <input type="color" id="bgColor" value="#ff2d55">
+        <span class="val" id="bgColorVal">#ff2d55</span>
+      </div>
+      <div class="half">
+        <button class="ghost" id="pickImg">选择图片</button>
+        <button class="ghost" id="presetImg">默认图</button>
+      </div>
+      <button class="ghost" id="clearImg">清除图片(用底色)</button>
+      <input type="file" id="imgFile" accept="image/*">
+      <div class="imgname" id="imgName"></div>
+    </div>
+
+    <div class="group">
+      <div class="gt">圆屏尺寸</div>
+      <div class="seg" id="screen"></div>
+      <div class="row">
+        <label>设备像素比</label>
+        <select id="dpr">
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="3">3×</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>圆形裁切</label>
+        <select id="round">
+          <option value="1" selected>圆屏</option>
+          <option value="0">方屏(对照)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">播放</div>
+      <div class="half">
+        <button class="ghost" id="playBtn">暂停</button>
+        <button class="ghost" id="resetBtn">回到 0 帧</button>
+      </div>
+      <button class="ghost" id="stepBtn">前进一帧</button>
+    </div>
+
+    <div class="hint">
+      · 文字画在背景之后,<b>不参与</b>背景的缩放、遮罩、模糊、旋转;彩虹只改文字颜色。<br>
+      · 时钟是 <code>setTimeout</code> 自累加帧计数,不是墙上时间 —— 与小程序一致,掉帧时变慢而非跳步。<br>
+      · <code>phase</code> 1 单位 = 1.5 秒;背景每帧 <code>+(2/3)/24</code>。<br>
+      · 圆屏裁切只是最外层一道遮罩,<b>不参与运动数学</b> —— 位移、相位、循环间距仍按方形画布算(文档的运动量都按 466 方形定义)。<br>
+      · 466 是文档基准;360 上是同一套动画按 <code>size/466</code> 等比缩小。<br>
+      · 按 <kbd>空格</kbd> 暂停 / 恢复,<kbd>→</kbd> 单步,<kbd>R</kbd> 归零。<br>
+      · 图片按短边居中裁成正方形;设备端只收到枚举,这里是编辑页预览的还原。
+    </div>
+  </aside>
+
+<script src="preset-image.js"></script>
+<script src="cheer-preview.js"></script>
+<script>
+"use strict";
+(() => {
+  const CP = window.CheerPreview;
+  const $ = (id) => document.getElementById(id);
+
+  const eng = new CP.Engine($('cv'));
+
+  // ---------- 分段按钮 ----------
+  // opts.note   第二行小字(bgFx 用来标周期、尺寸用来标「基准」)
+  // opts.reset  选中后是否把相位打回 0。换 textFx / bgFx 要重置,否则会看到
+  //             上一个效果残留的偏移;但换排版或尺寸只是换看法,不该打断动画。
+  // opts.apply  自定义应用方式(尺寸不是 engine.data 的字段,要走 resize)
+  function buildSeg(host, items, key, opts) {
+    const o = opts || {};
+    host.innerHTML = '';
+    items.forEach((it) => {
+      const b = document.createElement('button');
+      b.dataset.v = String(it.value);
+      b.innerHTML = o.note && it.note !== undefined
+        ? `${it.label}<span class="pd">${it.note}</span>`
+        : it.label;
+      b.addEventListener('click', () => {
+        if (o.apply) o.apply(it.value); else eng.set({ [key]: it.value });
+        if (o.reset) eng.reset();
+        syncSeg(host, it.value);
+      });
+      host.appendChild(b);
+    });
+    syncSeg(host, o.current ? o.current() : eng.data[key]);
+  }
+  function syncSeg(host, v) {
+    host.querySelectorAll('button')
+      .forEach((b) => b.classList.toggle('on', b.dataset.v === String(v)));
+  }
+  // bgFx 的第二行小字是周期,复用 note 字段
+  const BG_FX_SEG = CP.BG_FX.map((b) => ({ value: b.value, label: b.label, note: b.period }));
+  buildSeg($('textFx'),    CP.TEXT_FX,    'scrollMode',    { reset: true });
+  buildSeg($('bgFx'),      BG_FX_SEG,     'bgLightEffect', { reset: true, note: true });
+  buildSeg($('textLayout'), CP.TEXT_LAYOUT, 'textLayout',  {});
+
+  // ---------- 圆屏尺寸 ----------
+  let screenSize = CP.SCREENS[0].value;
+  function applySize() {
+    eng.resize(screenSize, +$('dpr').value);
+  }
+  buildSeg($('screen'), CP.SCREENS, null, {
+    note: true,
+    current: () => screenSize,
+    apply: (v) => { screenSize = v; applySize(); }
+  });
+  $('dpr').addEventListener('change', applySize);
+  $('round').addEventListener('change', (e) => eng.set({ round: e.target.value === '1' }));
+
+  // ---------- 参数绑定 ----------
+  $('text').addEventListener('input', (e) => eng.set({ text: e.target.value }));
+
+  const bindRange = (id, valId, fmt, set) => {
+    const el = $(id), out = $(valId);
+    const upd = () => { set(+el.value); out.textContent = fmt(+el.value); };
+    el.addEventListener('input', upd); upd();
+  };
+  bindRange('fontSize', 'fontSizeVal', (v) => String(v),        (v) => eng.set({ fontSize: v }));
+  bindRange('speed',    'speedVal',    (v) => v.toFixed(2) + '×', (v) => eng.set({ speed: v }));
+
+  const bindColor = (id, valId, key) => {
+    const el = $(id), out = $(valId);
+    const upd = () => { eng.set({ [key]: el.value }); out.textContent = el.value; };
+    el.addEventListener('input', upd); upd();
+  };
+  bindColor('fontColor', 'inkVal',     'fontColor');
+  bindColor('bgColor',   'bgColorVal', 'bgColor');
+
+  // ---------- 背景图 ----------
+  function showImgName(s) { $('imgName').textContent = s || ''; }
+
+  // 文件选择 / 拖放共用一条路径:成功才换图,失败不动现有背景
+  function useFile(f) {
+    if (!f || !/^image\//.test(f.type)) return;
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => { eng.set({ bgImage: img }); showImgName(f.name); URL.revokeObjectURL(url); };
+    img.onerror = () => { URL.revokeObjectURL(url); alert('图片加载失败:' + f.name); };
+    img.src = url;
+  }
+
+  // 默认图(内联 base64,离线可用)
+  const preset = window.CHEER_PRESET_IMAGE;
+  function usePreset() {
+    if (!preset) { alert('默认图未加载(preset-image.js 缺失)'); return; }
+    const img = new Image();
+    img.onload = () => { eng.set({ bgImage: img }); showImgName(preset.name + ' · 默认'); };
+    img.onerror = () => alert('默认图解码失败');
+    img.src = preset.src;
+  }
+
+  $('pickImg').addEventListener('click', () => $('imgFile').click());
+  $('presetImg').addEventListener('click', usePreset);
+  $('imgFile').addEventListener('change', (e) => useFile(e.target.files && e.target.files[0]));
+  $('clearImg').addEventListener('click', () => {
+    eng.set({ bgImage: null });
+    $('imgFile').value = '';
+    showImgName('');
+  });
+
+  // 拖图进舞台也能换背景
+  const stage = $('stage');
+  stage.addEventListener('dragover', (e) => { e.preventDefault(); });
+  stage.addEventListener('drop', (e) => {
+    e.preventDefault();
+    useFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+  });
+
+  // ---------- 播放控制 ----------
+  function setPlayLabel() { $('playBtn').textContent = eng.running() ? '暂停' : '播放'; }
+  function toggle() {
+    if (eng.running()) eng.stop(); else eng.start();
+    setPlayLabel();
+  }
+  $('playBtn').addEventListener('click', toggle);
+  $('resetBtn').addEventListener('click', () => eng.reset());
+  $('stepBtn').addEventListener('click', () => { eng.stop(); setPlayLabel(); eng.step(); });
+  $('cv').addEventListener('click', toggle);
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'TEXTAREA') return;
+    if (e.code === 'Space')      { e.preventDefault(); toggle(); }
+    else if (e.code === 'ArrowRight') { e.preventDefault(); eng.stop(); setPlayLabel(); eng.step(); }
+    else if (e.code === 'KeyR')  { e.preventDefault(); eng.reset(); }
+  });
+
+  // ---------- 读数 ----------
+  eng.onframe = (en) => {
+    const sec = en._textPhase / CP.PREVIEW_FPS;
+    const bgSec = CP.effectSeconds(en._lightPhase, en.data.speed);
+    const n = CP.layoutLines(en.data.text, en.data.textLayout).length;
+    // 溢出按 466 基准折算回去报,跟字号同一把尺子,好直接判断该调到多少
+    const clip = en._clip
+      ? `<br><b class="warn">文字超出${en.data.round ? '圆屏' : '画布'} ` +
+        `${Math.ceil(en._clip.over * CP.REF / en.canvas.width)}px(466 基准)—— 两端会被裁</b>`
+      : '';
+    $('meta').innerHTML =
+      `frame ${en._textPhase} · text ${sec.toFixed(2)}s · scrollOffset ${en._scrollOffset.toFixed(1)}px` +
+      `<br>phase ${en._lightPhase.toFixed(3)} · bg ${bgSec.toFixed(2)}s · ink ${en._inkColor()}` +
+      `<br>${screenSize}² ${en.data.round ? '圆屏' : '方屏'} @${en._dpr}× · ${en.canvas.width}px · ${n} 行` +
+      clip;
+  };
+
+  // ---------- 启动 ----------
+  applySize();
+  usePreset();            // 默认就带图,开箱即见效果(底色仍可用「清除图片」切回)
+  eng.start();
+  setPlayLabel();
+})();
+</script>
+</body>
+</html>

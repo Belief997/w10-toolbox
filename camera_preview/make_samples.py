@@ -186,6 +186,55 @@ def pack_raw12_mipi(p):
 def pack_raw_unpacked(p, big_endian=False, shift=0):
     return (p.astype(np.uint16) << shift).astype('>u2' if big_endian else '<u2').tobytes()
 
+
+def pack_ov2640_raw10(p, pad=0x3F):
+    """OV2640 等 8bit DVP 口抓 10bit:每像素 2 字节 ——
+    第 1 字节 = RAW10 高 8 位,第 2 字节低 2 位 = RAW10 低 2 位。
+    第 2 字节高 6 位是填充,默认塞 0x3F(全 1),用来验证解析端确实把它们屏蔽掉了。"""
+    v = p.astype(np.uint16)
+    out = np.empty(v.shape + (2,), dtype=np.uint8)
+    out[..., 0] = (v >> 2).astype(np.uint8)
+    out[..., 1] = ((v & 3) | ((pad & 0x3F) << 2)).astype(np.uint8)
+    return out.tobytes()
+
+
+def pack_ror2(p):
+    """MAP=ROR2:真值在 10 位内循环右移 2 位,再按 16bit 小端存。
+    结果是 byte0 = 真值高 8 位,byte1 = 真值低 2 位(高 6 位为 0)。"""
+    v = p.astype(np.uint16) & 0x3FF
+    stored = ((v >> 2) | ((v & 3) << 8)) & 0x3FF
+    return stored.astype('<u2').tobytes()
+
+
+def make_raw10_container(payload, w, h, bits=10, bayer='BGGR', mapping='ROR2',
+                         frame=7, endian='LE', drop=()):
+    """按 $RAW10BEGIN 容器规范打包:ASCII 头 + 定长二进制 + ASCII 尾。
+
+    drop 给出要删掉的字节下标,用来造「串口丢字节」的样例 ——
+    查看器应当靠 CHECKSUM 发现它,并用重同步把画面救回来。
+    注意 CHECKSUM 是按丢字节之前的完整数据算的(发送端算的就是完整数据),
+    这样接收端才能通过校验和察觉到丢失。
+    """
+    data = bytearray(payload)
+    checksum = sum(data)                      # 发送端对完整数据求和
+    for i in sorted(drop, reverse=True):
+        del data[i]
+    hdr = (f'$RAW10BEGIN\r\nWIDTH={w}\r\nHEIGHT={h}\r\nBYTES={len(payload)}\r\n'
+           f'BPP=2\r\nENDIAN={endian}\r\nBITS={bits}\r\nMAP={mapping}\r\n'
+           f'BAYER={bayer}\r\nCHECKSUM={checksum}\r\nFRAME={frame}\r\nDATA\r\n')
+    return hdr.encode('ascii') + bytes(data) + b'\r\n$RAW10END\r\n'
+
+
+def as_hex_text(data, per_line=16, upper=True, prefix=''):
+    """转成串口工具那种十六进制文本:每行 per_line 个字节,空格分隔。
+    prefix 可以模拟时间戳/TAG 前缀。"""
+    lines = []
+    for p in range(0, len(data), per_line):
+        chunk = data[p:p + per_line]
+        h = ' '.join(f'{b:02X}' if upper else f'{b:02x}' for b in chunk)
+        lines.append(prefix.format(off=p) + h if prefix else h)
+    return ('\n'.join(lines) + '\n').encode('ascii')
+
 # ------------------------------------------------------------------ 主流程
 
 def main():
@@ -273,6 +322,42 @@ def main():
     files[f'jpeg_{w}x{h}.jpg'] = dict(bytes=os.path.getsize(P(f'jpeg_{w}x{h}.jpg')),
                                       width=w, height=h, fmt='jpeg')
     print(f'  jpeg_{w}x{h}.jpg{"":21s} {files[f"jpeg_{w}x{h}.jpg"]["bytes"]:>10,} B')
+
+    # ---- 预处理样例:串口抓下来的文本化 dump ----
+    # OV2640 RAW10 BGGR:每像素 2 字节的位摆放 + hex 文本,预处理那一套的主用例
+    b10_bggr = to_bayer(img, 'bggr', 10)
+    ov = pack_ov2640_raw10(b10_bggr)
+    emit(f'ov2640_raw10_bggr_{w}x{h}.bin', ov,
+         fmt='raw10u', cfa='bggr', profile='ov2640_raw10_bggr', note='2 字节/像素,未转文本')
+    emit(f'ov2640_raw10_bggr_{w}x{h}.hex.txt', as_hex_text(ov),
+         fmt='raw10u', cfa='bggr', profile='ov2640_raw10_bggr', note='hex 文本,无前缀')
+    emit(f'ov2640_raw10_bggr_log_{w}x{h}.txt',
+         as_hex_text(ov, prefix='[{off:10d}.000000] cam_dump: '),
+         fmt='raw10u', cfa='bggr', profile='ov2640_raw10_bggr', note='hex 文本 + dmesg 时间戳前缀')
+
+    # $RAW10BEGIN 容器(头部自描述 + 定长二进制 + 校验和)
+    ror2 = pack_ror2(b10_bggr)
+    emit(f'raw10c_bggr_{w}x{h}.bin', make_raw10_container(ror2, w, h),
+         fmt='raw10u', cfa='bggr', profile='raw10_container', note='容器 · 纯二进制')
+    # 同一帧被串口工具转成 hex 文本(data/01.dat 的形态)
+    emit(f'raw10c_bggr_hex_{w}x{h}.txt',
+         as_hex_text(make_raw10_container(ror2, w, h)),
+         fmt='raw10u', cfa='bggr', profile='raw10_container', note='容器 · hex 文本载体')
+    # 故意丢 12 个字节:校验和应当报错,重同步应当把画面救回来
+    emit(f'raw10c_bggr_lost12_{w}x{h}.bin',
+         make_raw10_container(ror2, w, h, drop=[1000 + i * 2531 for i in range(12)]),
+         fmt='raw10u', cfa='bggr', profile='raw10_container', note='容器 · 丢 12 字节')
+
+    # 通用文本化样例:rgb565 的 xxd 风格(验证 hexdump 解析)
+    src565 = enc_rgb565(img)
+    xxd = []
+    for p in range(0, len(src565), 16):
+        chunk = src565[p:p + 16]
+        hexpart = ' '.join(chunk[i:i + 2].hex() for i in range(0, len(chunk), 2))
+        ascii_part = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in chunk)
+        xxd.append(f'{p:08x}: {hexpart:<39}  {ascii_part}')
+    emit(f'rgb565_xxd_{w}x{h}.txt', ('\n'.join(xxd) + '\n').encode('ascii'),
+         fmt='rgb565', note='xxd 风格 hexdump 文本')
 
     # ---- 带 stride 填充的一例(真机 dump 常见:行按 64 对齐)----
     ls = ((w * 2 + 63) // 64) * 64
