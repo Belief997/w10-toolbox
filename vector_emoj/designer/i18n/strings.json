@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "defaultLocale": "en-US",
+  "locales": [
+    "en-US"
+  ],
+  "strings": {
+    "14:": {
+      "en-US": "14:31"
+    }
+  },
+  "activeLocale": "en-US"
+}

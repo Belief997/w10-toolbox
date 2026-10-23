@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hml>
+    <meta>
+        <project name="Mi_eBadge" appId="com.example.Mi_eBadge" resolution="466X466" minSdk="API 2: HoneyGUI V1.1.0" pixelMode="RGB565" />
+        <author name="Anonymous" />
+    </meta>
+    <view>
+        <hg_view id="GrokMainView" x="419" y="-183" width="466" height="466" backgroundColor="#000000" borderRadius="20" padding="12" overflow="auto" entry="false" animateStep="100" timers="[{&quot;id&quot;:&quot;timer_0&quot;,&quot;name&quot;:&quot;Animation 1&quot;,&quot;enabled&quot;:true,&quot;interval&quot;:3000,&quot;reload&quot;:true,&quot;mode&quot;:&quot;custom&quot;,&quot;callback&quot;:&quot;view_poweron_timer_0_cb&quot;,&quot;duration&quot;:1000,&quot;stopOnComplete&quot;:true,&quot;delayStart&quot;:0,&quot;actions&quot;:[],&quot;segments&quot;:[]}]" zIndex="1" />
+    </view>
+</hml>

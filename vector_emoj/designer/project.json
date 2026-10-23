@@ -1,0 +1,16 @@
+{
+  "$schema": "HoneyGUI",
+  "type": "Designer",
+  "version": "1.0.0",
+  "name": "Grok",
+  "appId": "com.example.Grok",
+  "resolution": "466X466",
+  "cornerRadius": -1,
+  "targetEngine": "honeygui",
+  "aiAssets": true,
+  "minSdk": "API 2: HoneyGUI V1.1.0",
+  "pixelMode": "RGB565",
+  "mainHmlFile": "ui/GrokMain.hml",
+  "romfsBaseAddr": "0x70536400",
+  "created": "2026-08-10T08:18:57.573Z"
+}

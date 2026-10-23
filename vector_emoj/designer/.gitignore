@@ -1,0 +1,17 @@
+# Build files
+build/*
+
+!build/app_romfs*.bin
+
+# Codegen output (regenerated every build)
+
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Claude files
+.claude/
+.playwright-mcp/

@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tear Edge Editor</title>
+<style>
+:root {
+    color-scheme: dark;
+    font: 14px system-ui, sans-serif;
+}
+
+body {
+    margin: 0;
+    background: #202124;
+    color: #eee;
+}
+
+main {
+    display: grid;
+    grid-template-columns: minmax(520px, 1fr) 380px;
+    gap: 18px;
+    padding: 18px;
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
+canvas {
+    display: block;
+    background: #151515;
+    border: 1px solid #555;
+}
+
+#preview {
+    width: min(78vw, 720px);
+    height: min(78vw, 720px);
+    max-height: calc(100vh - 36px);
+}
+
+#curve {
+    width: 100%;
+    height: auto;
+    touch-action: none;
+}
+
+.panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.box {
+    padding: 12px;
+    background: #2b2d31;
+    border-radius: 8px;
+}
+
+h2 {
+    margin: 0 0 8px;
+    font-size: 18px;
+}
+
+label {
+    display: grid;
+    grid-template-columns: 1fr 100px;
+    gap: 8px;
+    align-items: center;
+    margin: 7px 0;
+}
+
+input[type="number"] {
+    width: 90px;
+    box-sizing: border-box;
+}
+
+input[type="file"] {
+    width: 100%;
+}
+
+textarea {
+    width: 100%;
+    height: 190px;
+    box-sizing: border-box;
+    background: #161719;
+    color: #ddd;
+    border: 1px solid #555;
+    font: 12px monospace;
+}
+
+button {
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 5px;
+    background: #4388d8;
+    color: white;
+    cursor: pointer;
+}
+
+button.secondary {
+    background: #555;
+}
+
+button+button {
+    margin-left: 6px;
+}
+
+.row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.hint {
+    color: #aaa;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.tabs button.active {
+    background: #d2763c;
+}
+
+.status {
+    min-height: 18px;
+    color: #9ed4ff;
+    font: 12px monospace;
+}
+</style>
+</head>
+<body>
+<main>
+    <canvas id="preview" width="466" height="466"></canvas>
+
+    <section class="panel">
+        <div class="box">
+            <h2>Source image</h2>
+            <input id="imageFile" type="file" accept="image/*">
+            <div class="status" id="imageStatus">No image loaded.</div>
+            <p class="hint">
+                The image is fitted to 466×466. The preview shows the intact image dimmed
+                and the tear band at full opacity.
+            </p>
+        </div>
+
+        <div class="box">
+            <h2>Curve shape</h2>
+            <p class="hint">
+                Both curves stay inside the fixed tear width. The top edge can only move inward
+                (down), and the bottom edge can only move inward (up).
+            </p>
+            <label>Width <input id="width" type="number" value="164" min="1" max="466"></label>
+            <label>Samples <input id="samples" type="number" value="64" min="4" max="512"></label>
+            <label>Random amplitude <input id="scale" type="number" value="1" min="0.1" max="10" step="0.1"></label>
+            <label>Seed <input id="seed" type="number" value="17" min="0" max="999999"></label>
+            <div class="row">
+                <button id="random">Generate random curve</button>
+                <button class="secondary" id="reset">Reset</button>
+            </div>
+        </div>
+
+        <div class="box">
+            <div class="tabs">
+                <button id="tabTop" class="active">Top edge</button>
+                <button id="tabBottom">Bottom edge</button>
+            </div>
+            <p class="hint">Drag control points to shape the irregular tear edge.</p>
+            <canvas id="curve" width="360" height="190"></canvas>
+        </div>
+
+        <div class="box">
+            <h2>Export</h2>
+            <div class="row">
+                <button id="downloadPreview">Preview PNG</button>
+                <button id="downloadTear">Torn part PNG</button>
+                <button id="downloadC">C arrays</button>
+            </div>
+            <p class="hint">
+                Torn part PNG first crops the selected band, rotates it -90°, and exports
+                a transparent image with dimensions Width×466.
+            </p>
+            <textarea id="array" readonly></textarea>
+        </div>
+
+        <div class="box hint">
+            <b>Runtime mapping</b><br>
+            The exported top/bottom arrays are signed normal offsets at axis samples.
+            They can replace the values used by the firmware tear-edge routine after
+            adapting the runtime to read both boundary arrays.
+        </div>
+    </section>
+</main>
+
+<script>
+const W = 466;
+const H = 466;
+const curveW = 360;
+const curveH = 190;
+const curveMid = curveH / 2;
+
+const preview = document.querySelector('#preview');
+const previewCtx = preview.getContext('2d');
+const curve = document.querySelector('#curve');
+const curveCtx = curve.getContext('2d');
+const $ = id => document.getElementById(id);
+
+let samples = 64;
+let width = 164;
+let amplitude = 1;
+let activeEdge = 'top';
+let topEdge = [];
+let bottomEdge = [];
+let sourceImage = null;
+let sourceUrl = null;
+
+function hash(value) {
+    value = (value ^ 61) ^ (value >>> 16);
+    value = Math.imul(value, 9);
+    value ^= value >>> 4;
+    value = Math.imul(value, 0x27d4eb2d);
+    return (value ^ (value >>> 15)) >>> 0;
+}
+
+function maxOffset() {
+    return Math.max(2, Math.floor(width / 2) - 1);
+}
+
+function smooth(values) {
+    let result = values.slice();
+    for (let pass = 0; pass < 3; pass++) {
+        result = result.map((value, index) => {
+            const previous = result[index - 1] ?? value;
+            const next = result[index + 1] ?? value;
+            return Math.round((previous + value * 2 + next) / 4);
+        });
+    }
+    return result;
+}
+
+function randomCurve(seed) {
+    let random = hash(seed);
+    const result = [];
+    const range = Math.min(width, Math.max(2, amplitude * 8));
+    for (let i = 0; i < samples; i++) {
+        random = hash(random + i + 1);
+        const amount = Math.round((random % (range + 1)));
+        result.push(activeEdge === 'top' ? amount : -amount);
+    }
+    return smooth(result);
+}
+
+function clampEdges() {
+    for (let i = 0; i < samples; i++) {
+        topEdge[i] = Math.max(0, Math.min(width, topEdge[i]));
+        bottomEdge[i] = Math.min(0, Math.max(-width, bottomEdge[i]));
+        if (topEdge[i] - bottomEdge[i] > width) {
+            bottomEdge[i] = topEdge[i] - width;
+        }
+    }
+}
+
+function reset() {
+    samples = Number($('samples').value);
+    width = Number($('width').value);
+    amplitude = Number($('scale').value);
+    topEdge = new Array(samples).fill(0);
+    bottomEdge = new Array(samples).fill(0);
+    drawAll();
+}
+
+function interpolate(values, x) {
+    const position = Math.max(0, Math.min(samples - 1, x / (W - 1) * (samples - 1)));
+    const index = Math.floor(position);
+    const fraction = position - index;
+    const next = Math.min(samples - 1, index + 1);
+    return values[index] + (values[next] - values[index]) * fraction;
+}
+
+function bandBounds(x) {
+    const topOffset = Math.max(0, interpolate(topEdge, x));
+    const bottomOffset = Math.min(0, interpolate(bottomEdge, x));
+    const center = H / 2;
+    const top = center - width / 2 + topOffset;
+    const bottom = center + width / 2 + bottomOffset;
+    return {
+        top: Math.max(center - width / 2, Math.min(center + width / 2, top)),
+        bottom: Math.max(center - width / 2, Math.min(center + width / 2, bottom))
+    };
+}
+
+function createBandPath(context) {
+    const path = new Path2D();
+    const first = bandBounds(0);
+    path.moveTo(0, first.top);
+    for (let x = 1; x < W; x++) {
+        path.lineTo(x, bandBounds(x).top);
+    }
+    for (let x = W - 1; x >= 0; x--) {
+        path.lineTo(x, bandBounds(x).bottom);
+    }
+    path.closePath();
+    return path;
+}
+
+function imageLayout() {
+    if (!sourceImage) {
+        return null;
+    }
+    const scale = Math.max(W / sourceImage.naturalWidth, H / sourceImage.naturalHeight);
+    const drawWidth = sourceImage.naturalWidth * scale;
+    const drawHeight = sourceImage.naturalHeight * scale;
+    return {
+        x: (W - drawWidth) / 2,
+        y: (H - drawHeight) / 2,
+        width: drawWidth,
+        height: drawHeight
+    };
+}
+
+function drawImageFitted(context) {
+    const layout = imageLayout();
+    if (layout) {
+        context.drawImage(sourceImage, layout.x, layout.y, layout.width, layout.height);
+    } else {
+        context.fillStyle = '#eeeeee';
+        context.fillRect(0, 0, W, H);
+    }
+}
+
+function drawBandImage(context, alpha) {
+    context.save();
+    context.globalAlpha = alpha;
+    context.clip(createBandPath(context));
+    drawImageFitted(context);
+    context.restore();
+}
+
+function createTornPartCanvas() {
+    const cropWidth = Math.round(width);
+    const cropTop = (H - cropWidth) / 2;
+    const bandCanvas = document.createElement('canvas');
+    bandCanvas.width = W;
+    bandCanvas.height = cropWidth;
+    const bandContext = bandCanvas.getContext('2d');
+
+    bandContext.save();
+    bandContext.translate(0, -cropTop);
+    bandContext.clip(createBandPath(bandContext));
+    drawImageFitted(bandContext);
+    bandContext.restore();
+
+    const output = document.createElement('canvas');
+    output.width = cropWidth;
+    output.height = H;
+    const outputContext = output.getContext('2d');
+    outputContext.translate(0, H);
+    outputContext.rotate(Math.PI * 3 / 2);
+    outputContext.drawImage(bandCanvas, 0, 0);
+    return output;
+}
+
+function drawPreview() {
+    previewCtx.clearRect(0, 0, W, H);
+    previewCtx.fillStyle = '#050505';
+    previewCtx.fillRect(0, 0, W, H);
+
+    if (sourceImage) {
+        previewCtx.save();
+        previewCtx.globalAlpha = 0.28;
+        drawImageFitted(previewCtx);
+        previewCtx.restore();
+        drawBandImage(previewCtx, 1);
+    } else {
+        drawBandImage(previewCtx, 1);
+    }
+
+    previewCtx.strokeStyle = '#f04444';
+    previewCtx.lineWidth = 2;
+    previewCtx.beginPath();
+    previewCtx.moveTo(0, H / 2);
+    previewCtx.lineTo(W, H / 2);
+    previewCtx.stroke();
+
+    previewCtx.strokeStyle = '#ffcf70';
+    previewCtx.lineWidth = 1;
+    previewCtx.beginPath();
+    for (let x = 0; x < W; x++) {
+        const y = bandBounds(x).top;
+        if (x === 0) previewCtx.moveTo(x, y);
+        else previewCtx.lineTo(x, y);
+    }
+    previewCtx.stroke();
+    previewCtx.beginPath();
+    for (let x = 0; x < W; x++) {
+        const y = bandBounds(x).bottom;
+        if (x === 0) previewCtx.moveTo(x, y);
+        else previewCtx.lineTo(x, y);
+    }
+    previewCtx.stroke();
+}
+
+function drawCurve() {
+    curveCtx.clearRect(0, 0, curveW, curveH);
+    curveCtx.fillStyle = '#303238';
+    curveCtx.fillRect(0, 0, curveW, curveH);
+    curveCtx.strokeStyle = '#777';
+    curveCtx.beginPath();
+    curveCtx.moveTo(0, curveMid);
+    curveCtx.lineTo(curveW, curveMid);
+    curveCtx.stroke();
+
+    for (const [values, color] of [[topEdge, '#58b7ff'], [bottomEdge, '#ff9f5a']]) {
+        const points = values.map((value, index) => ({
+            x: index / (samples - 1) * curveW,
+            y: curveMid - value * 2
+        }));
+        curveCtx.strokeStyle = color;
+        curveCtx.lineWidth = 2;
+        curveCtx.beginPath();
+        points.forEach((point, index) => {
+            if (index === 0) curveCtx.moveTo(point.x, point.y);
+            else curveCtx.lineTo(point.x, point.y);
+        });
+        curveCtx.stroke();
+
+        if (values === (activeEdge === 'top' ? topEdge : bottomEdge)) {
+            curveCtx.fillStyle = color;
+            points.forEach(point => {
+                curveCtx.beginPath();
+                curveCtx.arc(point.x, point.y, 4, 0, Math.PI * 2);
+                curveCtx.fill();
+            });
+        }
+    }
+}
+
+function cArrays() {
+    const format = values => values.map((value, index) => {
+        const suffix = index === values.length - 1 ? '' : ',';
+        return String(value).padStart(4, ' ') + suffix;
+    }).join(' ');
+    return `#define TEAR_EDGE_TABLE_LEN ${samples}\n\nstatic const int8_t tear_edge_top_table[TEAR_EDGE_TABLE_LEN] = {\n    ${format(topEdge)}\n};\n\nstatic const int8_t tear_edge_bottom_table[TEAR_EDGE_TABLE_LEN] = {\n    ${format(bottomEdge)}\n};\n`;
+}
+
+function drawAll() {
+    drawCurve();
+    drawPreview();
+    $('array').value = cArrays();
+}
+
+function updateCurvePoint(event) {
+    const rect = curve.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width * (samples - 1);
+    const y = (event.clientY - rect.top) / rect.height * curveH;
+    const index = Math.max(0, Math.min(samples - 1, Math.round(x)));
+    let value = Math.round((curveMid - y) / 2);
+    const maxInset = Math.max(0, width);
+    if (activeEdge === 'top') {
+        value = Math.max(0, Math.min(maxInset, value));
+    } else {
+        value = Math.min(0, Math.max(-maxInset, value));
+    }
+    const values = activeEdge === 'top' ? topEdge : bottomEdge;
+    values[index] = value;
+    clampEdges();
+    drawAll();
+}
+
+curve.addEventListener('pointerdown', event => {
+    curve.setPointerCapture(event.pointerId);
+    updateCurvePoint(event);
+});
+curve.addEventListener('pointermove', event => {
+    if (event.buttons) updateCurvePoint(event);
+});
+
+$('imageFile').addEventListener('change', event => {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+    sourceUrl = URL.createObjectURL(file);
+    sourceImage = new Image();
+    sourceImage.onload = () => {
+        $('imageStatus').textContent = `${sourceImage.naturalWidth}×${sourceImage.naturalHeight} loaded`;
+        drawPreview();
+    };
+    sourceImage.src = sourceUrl;
+});
+
+$('tabTop').onclick = () => {
+    activeEdge = 'top';
+    $('tabTop').classList.add('active');
+    $('tabBottom').classList.remove('active');
+    drawCurve();
+};
+$('tabBottom').onclick = () => {
+    activeEdge = 'bottom';
+    $('tabBottom').classList.add('active');
+    $('tabTop').classList.remove('active');
+    drawCurve();
+};
+$('random').onclick = () => {
+    samples = Number($('samples').value);
+    width = Number($('width').value);
+    amplitude = Number($('scale').value);
+    activeEdge = 'top';
+    topEdge = randomCurve(Number($('seed').value));
+    activeEdge = 'bottom';
+    bottomEdge = randomCurve(Number($('seed').value) + 999);
+    clampEdges();
+    activeEdge = 'top';
+    drawAll();
+};
+$('reset').onclick = reset;
+['width', 'samples', 'scale'].forEach(id => {
+    $(id).onchange = reset;
+});
+
+function downloadBlob(blob, name) {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+$('downloadPreview').onclick = () => {
+    preview.toBlob(blob => downloadBlob(blob, 'tear_preview.png'), 'image/png');
+};
+
+$('downloadTear').onclick = () => {
+    const output = createTornPartCanvas();
+    output.toBlob(blob => downloadBlob(blob, 'tear_part_transparent.png'), 'image/png');
+};
+
+$('downloadC').onclick = () => {
+    downloadBlob(new Blob([cArrays()], {type: 'text/plain'}), 'tear_edge_tables.h');
+};
+
+reset();
+</script>
+</body>
+</html>
