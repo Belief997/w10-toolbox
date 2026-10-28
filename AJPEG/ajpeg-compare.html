@@ -1,0 +1,1496 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AJPEG 对比 · JPEG(YUV420) + 尾部 RLE alpha</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #eceef4; background: #16171c; overflow: hidden; user-select: none;
+    display: flex;
+  }
+
+  /* ---------- 左侧控制栏 ---------- */
+  #panel {
+    width: 296px; flex: none; height: 100%; overflow-y: auto;
+    background: #1a1b21; border-right: 1px solid rgba(255,255,255,.07);
+    padding: 16px; display: flex; flex-direction: column; gap: 16px;
+  }
+  #panel h1 { font-size: 14px; margin: 0; letter-spacing: .01em; }
+  #panel h1 span { display: block; font-size: 11px; font-weight: 400; opacity: .45; margin-top: 4px; }
+  .grp { display: flex; flex-direction: column; gap: 7px; }
+  .grp > label {
+    font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+    opacity: .45;
+  }
+  select, input[type=range] { width: 100%; }
+  select {
+    background: #23252d; color: inherit; border: 1px solid rgba(255,255,255,.1);
+    border-radius: 7px; padding: 6px 8px; font-size: 12.5px;
+    font-family: inherit;
+  }
+  input[type=range] { accent-color: #60a5fa; height: 18px; }
+
+  .qhead { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; }
+  .qhead b { font-family: ui-monospace, Consolas, monospace; font-size: 15px; color: #93c5fd; }
+  #qticks { display: flex; justify-content: space-between; font-size: 10px; opacity: .35; margin-top: -3px; }
+
+  .toggles { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+  .toggles label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  input[type=checkbox] { accent-color: #60a5fa; width: 14px; height: 14px; }
+  .segbtns { display: flex; gap: 5px; }
+  .segbtns button {
+    flex: 1; background: #23252d; color: inherit; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.1); border-radius: 7px;
+    padding: 6px 0; font-size: 12px; font-family: inherit; transition: .12s;
+  }
+  .segbtns button:hover { background: #2b2e38; }
+  .segbtns button[aria-pressed=true] {
+    background: rgba(96,165,250,.2); border-color: rgba(96,165,250,.55); color: #bfdbfe;
+  }
+
+  /* ---------- 统计卡 ---------- */
+  #stats { display: flex; flex-direction: column; gap: 1px; background: rgba(255,255,255,.07);
+           border-radius: 9px; overflow: hidden; }
+  .row { display: flex; justify-content: space-between; align-items: baseline;
+         background: #1f2128; padding: 7px 10px; font-size: 12px; }
+  .row .k { opacity: .55; }
+  .row .v { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+  .row .v b { color: #fcd34d; }
+  .row.hi { background: #232a35; }
+  .row.hi .v { color: #93c5fd; }
+  .bar { display: flex; height: 7px; border-radius: 4px; overflow: hidden; margin-top: 2px;
+         background: rgba(255,255,255,.06); }
+  .bar i { display: block; height: 100%; }
+  .bar i.b1 { background: #60a5fa; }
+  .bar i.b2 { background: #fbbf24; }
+  .legend { display: flex; gap: 12px; font-size: 10.5px; opacity: .5; margin-top: 5px; }
+  .legend span::before { content: ""; display: inline-block; width: 7px; height: 7px;
+    border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+  .legend .l1::before { background: #60a5fa; }
+  .legend .l2::before { background: #fbbf24; }
+
+  #verify { font-size: 11px; font-family: ui-monospace, Consolas, monospace;
+            padding: 7px 10px; border-radius: 8px; line-height: 1.5; }
+  #verify.ok { background: rgba(52,211,153,.12); color: #6ee7b7; }
+  #verify.bad { background: rgba(248,113,113,.14); color: #fca5a5; }
+
+  /* ---------- 舞台 ---------- */
+  #stage {
+    flex: 1; min-width: 0; height: 100%; overflow: auto; padding: 20px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    background: radial-gradient(120% 120% at 50% 35%, #23252d 0%, #191a20 65%, #131419 100%);
+  }
+  #panes { display: flex; gap: 18px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+  /* alpha 视图四格,用 2×2 网格比自动换行整齐 */
+  #panes.grid2 {
+    display: grid; grid-template-columns: repeat(2, max-content);
+    align-items: start; justify-content: center;
+  }
+  /* 四格时把每格限制在视口内,大图也不会撑爆布局 */
+  #panes.grid2 .pane canvas {
+    max-width: min(46vw, 620px); max-height: 46vh;
+    width: auto; height: auto; object-fit: contain;
+  }
+
+  /* 画布 + 左下角角标 */
+  .cvwrap { position: relative; display: inline-block; line-height: 0;
+            max-width: 100%; max-height: 100%; }
+  .cvbadge {
+    position: absolute; left: 8px; bottom: 8px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11px; line-height: 1.4; font-weight: 600;
+    color: #f1f5f9; background: rgba(12,14,19,.78);
+    padding: 3px 7px; border-radius: 6px; text-align: left;
+    box-shadow: 0 2px 10px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.14);
+    backdrop-filter: blur(6px); pointer-events: none;
+    white-space: pre;          /* 角标里的 \n 要真的换行 */
+  }
+  .pane { display: flex; flex-direction: column; gap: 7px; }
+  .pane .cap { font-size: 12.5px; font-weight: 600; }
+  .pane .cap .tag {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 5px; margin-right: 7px; vertical-align: 1px;
+  }
+  .tag.o { background: rgba(148,163,184,.22); color: #cbd5e1; }
+  .tag.a { background: rgba(96,165,250,.2); color: #93c5fd; }
+  .tag.b { background: rgba(251,191,36,.2); color: #fcd34d; }
+  .tag.e { background: rgba(248,113,113,.2); color: #fca5a5; }
+  .pane .sub { font-size: 11px; opacity: .5; font-family: ui-monospace, Consolas, monospace;
+               min-height: 14px; }
+  .pane canvas {
+    display: block; border-radius: 10px; background: #0e0f13;
+    box-shadow: 0 18px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.07);
+  }
+  .pane canvas.checker {
+    background-image:
+      linear-gradient(45deg, #2a2d36 25%, transparent 25%, transparent 75%, #2a2d36 75%),
+      linear-gradient(45deg, #2a2d36 25%, #1d1f26 25%, #1d1f26 75%, #2a2d36 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 8px 8px;
+    border-radius: 0;
+    box-shadow: 0 18px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.1);
+  }
+
+  /* 分屏 */
+  #splitWrap { position: relative; cursor: ew-resize; touch-action: none; }
+  #splitLine {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,.9);
+    box-shadow: 0 0 10px rgba(0,0,0,.75); pointer-events: none;
+  }
+  #splitLine::after {
+    content: ""; position: absolute; left: 50%; top: 50%;
+    width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+    background: rgba(255,255,255,.92); box-shadow: 0 2px 10px rgba(0,0,0,.55);
+  }
+
+  #hint { font-size: 11.5px; opacity: .38; text-align: center; line-height: 1.6; }
+  #hint kbd { background: rgba(255,255,255,.1); border-radius: 4px; padding: 1px 5px;
+              font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; }
+  #hint .err { color: #fca5a5; opacity: .9; }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <h1><span data-i18n="title">AJPEG 对比</span>
+    <span data-i18n="subtitle">JPEG (YUV 4:2:0) + 尾部 RLE 压缩 alpha</span>
+  </h1>
+
+  <div class="grp">
+    <label for="selImg" data-i18n="image">图片</label>
+    <select id="selImg"></select>
+    <input type="file" id="fileInput" accept="image/*" multiple hidden>
+    <div class="segbtns">
+      <button id="btnFiles" data-i18n="importFiles">导入图片…</button>
+      <button id="btnDir" data-i18n="importDir">导入文件夹…</button>
+    </div>
+    <div id="importNote"></div>
+  </div>
+
+  <div class="grp">
+    <div class="qhead">
+      <label for="rngQ" data-i18n="quality">JPEG 质量</label><b><span id="qVal">85</span></b>
+    </div>
+    <input type="range" id="rngQ" min="1" max="100" step="1" value="85">
+    <div id="qticks"><span>1</span><span>50</span><span>100</span></div>
+  </div>
+
+  <div class="grp">
+    <label data-i18n="view">视图</label>
+    <div class="segbtns">
+      <button id="vSide" aria-pressed="true" data-i18n="viewSide">并排</button>
+      <button id="vSplit" aria-pressed="false" data-i18n="viewSplit">分屏拖动</button>
+      <button id="vAlpha" aria-pressed="false" data-i18n="viewAlpha">Alpha</button>
+    </div>
+  </div>
+
+  <div class="toggles">
+    <label><input type="checkbox" id="ckErr"> <span data-i18n="optErr">差异热力图</span></label>
+    <label><input type="checkbox" id="ckZoom"> <span data-i18n="optZoom">放大镜（鼠标处 4×）</span></label>
+  </div>
+
+  <div class="grp">
+    <label data-i18n="composition">体积构成</label>
+    <div id="stats"></div>
+    <div class="bar"><i class="b1" id="barJpeg"></i><i class="b2" id="barAlpha"></i></div>
+    <div class="legend">
+      <span class="l1" data-i18n="legendJpeg">JPEG 码流</span>
+      <span class="l2" data-i18n="legendAlpha">alpha 块</span>
+    </div>
+  </div>
+
+  <div class="grp">
+    <label data-i18n="verify">回环校验</label>
+    <div id="verify">—</div>
+  </div>
+
+  <div class="grp">
+    <label data-i18n="language">语言</label>
+    <div class="segbtns">
+      <button id="langZh" aria-pressed="true">中文</button>
+      <button id="langEn" aria-pressed="false">English</button>
+    </div>
+  </div>
+</div>
+
+<div id="stage">
+  <div id="panes"></div>
+  <div id="hint">
+    <span data-i18n="hint"></span>
+  </div>
+</div>
+
+<script src="ajpeg-decode.js"></script>
+<script src="out/data.js"></script>
+<script>
+"use strict";
+
+// --------------------------------------------------------------------------- //
+// 中英切换
+//
+// 静态文案走 HTML 里的 data-i18n="key";动态文案(画布标题、副标题、角标、
+// 提示)一律走 T("key", 参数)。新增文本时两边都要加,否则会漏翻译。
+// --------------------------------------------------------------------------- //
+
+const I18N = {
+  zh: {
+    title: "AJPEG 对比",
+    subtitle: "JPEG (YUV 4:2:0) + 尾部 RLE 压缩 alpha",
+    image: "图片",
+    importFiles: "导入图片…",
+    importDir: "导入文件夹…",
+    quality: "JPEG 质量",
+    view: "视图",
+    viewSide: "并排",
+    viewSplit: "分屏拖动",
+    viewAlpha: "Alpha",
+    optErr: "差异热力图",
+    optZoom: "放大镜（鼠标处 4×）",
+    composition: "体积构成",
+    legendJpeg: "JPEG 码流",
+    legendAlpha: "alpha 块",
+    verify: "回环校验",
+    language: "语言",
+    hint: "<kbd>空格</kbd> 按住看原图 · 分屏模式下拖动分割线",
+
+    // 画布标题
+    paneOrigAlpha: "原图 alpha",
+    paneConvAlpha: "转换后 alpha",
+    paneAlphaDiff: "两者差异（1 vs 2）",
+    paneBareJpeg: "转换后 JPEG（不含 alpha）",
+    paneOrig: "原图（未压缩）",
+    paneRebuilt: "AJPEG 重建",
+    paneDiffMap: "差异热力图 ×8",
+    paneZoom: "放大 4×",
+    paneSplit: "拖动分割线对比",
+
+    // 副标题
+    subOrigAlpha: (w, h) => `${w}×${h} · 8 bit/px · PNG 原始通道`,
+    subConvAlpha: (w, h, bytes) => `${w}×${h} · RLE 解出 · alpha 块 ${bytes}`,
+    subOrig: (w, h) => `${w}×${h} · PNG 原图叠加真实 alpha`,
+    subRebuilt: (jpeg, alpha) => `JPEG ${jpeg} + alpha ${alpha}`,
+    subBareJpeg: (bytes, q, sampling) => `${bytes} · q${q} · ${sampling}`,
+    subDiffMap: "越亮差异越大",
+    subSplit: (pct, q) => `左:原图 · 右:AJPEG(q${q}) · 分割 ${pct}%`,
+    subZoom: (x, y) => `(${x}, ${y})`,
+
+    // 角标
+    badgeLossless: "无损 ✓",
+    badgeLossy: "有差异 ✗",
+    badgeJpegOnly: "JPEG-only",
+
+    // alpha 差异格副标题
+    diffNoRef: "缺少参照，无法比对",
+    diffSame: (pct) => `与第 1 格完全一致：不透明 ${pct}% · 全黑即正确`,
+    diffDiff: (n, maxD, pct) =>
+      `${n} 像素不一致（最大 Δ=${maxD}）· 不透明 ${pct}%`,
+
+    // 校验卡
+    verifyLen: (a, b) => `长度不符：${a} ≠ ${b}`,
+    verifyOk: (n, sum) => `✓ alpha 无损<br>${n} 字节与原图逐字节一致`,
+    verifySum: (n, sum) => `RLE 解出 ${n} B · adler32 ${sum}`,
+    verifyBadSum: (a, b) => `✗ adler32 不符 ${a} ≠ ${b}`,
+    verifyBadPx: (n, d) => `✗ ${n} 个像素不符，最大 Δ=${d}`,
+
+    // 统计卡
+    statOrigFile: "原图文件",
+    statJpeg: "JPEG 码流",
+    statAlpha: "alpha 块",
+    statTotal: "AJPEG 合计",
+    statVsOrig: "vs 原图",
+    statBpp: "bpp",
+    statBppNote: "bit / pixel",
+    statPsnr: "PSNR / SSIM",
+    statSsim: "结构相似",
+    ofRaw: "占裸数据",
+
+    // 导入 / 状态提示
+    noImportable: "没有可导入的图片",
+    converting: (n) => `正在转换 ${n} 张…`,
+    importFailed: (name, err) => `${name} 导入失败:${err}`,
+    imported: (n, ok) => `已导入 ${n} 张 · 回环校验 ${ok ? "通过" : "失败"}`,
+    generating: (q) => `正在生成 q${q}…`,
+    genFailed: (q) => `无法生成 q${q}`,
+    liveEncoded: (q) => `q${q} 由浏览器现场编码（采样格式以码流为准）`,
+    noDecoder: "没有加载 ajpeg-decode.js",
+    noData: '没有读到 out/data.js，先跑 <kbd>python make_ajpeg.py</kbd>，或者直接导入图片',
+    onlyQ: (list) => `这张图只有 ${list} —— 要其他质量请在命令行用 -q 生成，或导入图片`,
+  },
+
+  en: {
+    title: "AJPEG Compare",
+    subtitle: "JPEG (YUV 4:2:0) + trailing RLE-compressed alpha",
+    image: "Image",
+    importFiles: "Import files…",
+    importDir: "Import folder…",
+    quality: "JPEG quality",
+    view: "View",
+    viewSide: "Side by side",
+    viewSplit: "Split drag",
+    viewAlpha: "Alpha",
+    optErr: "Difference heatmap",
+    optZoom: "Magnifier (4× under cursor)",
+    composition: "Size breakdown",
+    legendJpeg: "JPEG stream",
+    legendAlpha: "alpha block",
+    verify: "Round-trip check",
+    language: "Language",
+    hint: "<kbd>Space</kbd> hold to see the original · drag the divider in split view",
+
+    paneOrigAlpha: "Original alpha",
+    paneConvAlpha: "Converted alpha",
+    paneAlphaDiff: "Difference (1 vs 2)",
+    paneBareJpeg: "Converted JPEG (no alpha)",
+    paneOrig: "Original (uncompressed)",
+    paneRebuilt: "AJPEG rebuilt",
+    paneDiffMap: "Difference heatmap ×8",
+    paneZoom: "Zoom 4×",
+    paneSplit: "Drag the divider to compare",
+
+    subOrigAlpha: (w, h) => `${w}×${h} · 8 bit/px · original PNG channel`,
+    subConvAlpha: (w, h, bytes) => `${w}×${h} · RLE decoded · alpha block ${bytes}`,
+    subOrig: (w, h) => `${w}×${h} · PNG original with real alpha`,
+    subRebuilt: (jpeg, alpha) => `JPEG ${jpeg} + alpha ${alpha}`,
+    subBareJpeg: (bytes, q, sampling) => `${bytes} · q${q} · ${sampling}`,
+    subDiffMap: "brighter = larger difference",
+    subSplit: (pct, q) => `Left: original · Right: AJPEG(q${q}) · split ${pct}%`,
+    subZoom: (x, y) => `(${x}, ${y})`,
+
+    badgeLossless: "lossless ✓",
+    badgeLossy: "differs ✗",
+    badgeJpegOnly: "JPEG-only",
+
+    diffNoRef: "no reference, cannot compare",
+    diffSame: (pct) => `Identical to pane 1: opaque ${pct}% · all black is correct`,
+    diffDiff: (n, maxD, pct) =>
+      `${n} pixels differ (max Δ=${maxD}) · opaque ${pct}%`,
+
+    verifyLen: (a, b) => `Length mismatch: ${a} ≠ ${b}`,
+    verifyOk: (n) => `✓ alpha lossless<br>${n} bytes identical to the original`,
+    verifySum: (n, sum) => `RLE decoded ${n} B · adler32 ${sum}`,
+    verifyBadSum: (a, b) => `✗ adler32 mismatch ${a} ≠ ${b}`,
+    verifyBadPx: (n, d) => `✗ ${n} pixels differ, max Δ=${d}`,
+
+    statOrigFile: "Original file",
+    statJpeg: "JPEG stream",
+    statAlpha: "alpha block",
+    statTotal: "AJPEG total",
+    statVsOrig: "vs original",
+    statBpp: "bpp",
+    statBppNote: "bit / pixel",
+    statPsnr: "PSNR / SSIM",
+    statSsim: "SSIM",
+    ofRaw: "of raw",
+
+    noImportable: "No importable images",
+    converting: (n) => `Converting ${n} image${n > 1 ? "s" : ""}…`,
+    importFailed: (name, err) => `${name} failed: ${err}`,
+    imported: (n, ok) => `Imported ${n} · round-trip ${ok ? "passed" : "FAILED"}`,
+    generating: (q) => `Generating q${q}…`,
+    genFailed: (q) => `Cannot generate q${q}`,
+    liveEncoded: (q) => `q${q} encoded live in the browser (sampling read from the stream)`,
+    noDecoder: "ajpeg-decode.js not loaded",
+    noData: 'out/data.js not found — run <kbd>python make_ajpeg.py</kbd>, or just import images',
+    onlyQ: (list) => `This image only has ${list} — use -q on the command line, or import images`,
+  },
+};
+
+const state_lang = { lang: "zh" };
+
+/** 取当前语言的文案。key 缺失时回退中文,再缺就显示 key 本身。 */
+function T(key, ...args) {
+  const pack = I18N[state_lang.lang] || I18N.zh;
+  const v = pack[key] ?? I18N.zh[key];
+  if (v == null) { console.warn("缺少文案:", key); return key; }
+  return typeof v === "function" ? v(...args) : v;
+}
+
+/** 把 data-i18n 的静态文案刷成当前语言。 */
+function applyStaticText() {
+  for (const el2 of document.querySelectorAll("[data-i18n]")) {
+    const key = el2.getAttribute("data-i18n");
+    const v = T(key);
+    if (key === "hint") el2.innerHTML = v;   // 提示里有 <kbd>
+    else el2.textContent = v;
+  }
+  document.documentElement.lang = state_lang.lang === "zh" ? "zh-CN" : "en";
+  document.title = state_lang.lang === "zh"
+    ? "AJPEG 对比 · JPEG(YUV420) + 尾部 RLE alpha"
+    : "AJPEG Compare · JPEG (YUV 4:2:0) + trailing RLE alpha";
+}
+
+// 新增文案时的自检:中英两边的 key 必须一一对应
+(function checkI18NKeys() {
+  const zh = new Set(Object.keys(I18N.zh));
+  const en = new Set(Object.keys(I18N.en));
+  const missingEn = [...zh].filter(k => !en.has(k));
+  const missingZh = [...en].filter(k => !zh.has(k));
+  if (missingEn.length) console.warn("英文缺这些 key:", missingEn);
+  if (missingZh.length) console.warn("中文缺这些 key:", missingZh);
+})();
+
+// --------------------------------------------------------------------------- //
+// AJPEG 解码器:与 make_ajpeg.py 的 rle_encode / build_alpha_block 对称
+// --------------------------------------------------------------------------- //
+
+// 编解码器在 ajpeg-decode.js 里,查看器和 verify_ajpeg.cjs 共用同一份
+const {
+  adler32, decodeAlpha: decodeAlphaRaw,
+  buildAlphaBlock, buildAJPEG, parseAJPEG, parseJpeg, samplingLabel,
+} = window.AJPEGDecode;
+
+const alphaCache = new Map();
+function decodeAlpha(img) {
+  if (!alphaCache.has(img.name)) alphaCache.set(img.name, decodeAlphaRaw(img));
+  return alphaCache.get(img.name);
+}
+
+/**
+ * 原图 alpha(8bit 灰度 PNG),单独走一遍浏览器 PNG 解码作对照。
+ * 导入的图没有这张 PNG,importFiles 会直接往缓存里塞解码好的数组。
+ */
+const alphaRefCache = new Map();
+function decodeAlphaPng(img) {
+  if (alphaRefCache.has(img.name)) return alphaRefCache.get(img.name);
+  if (!img.alphaPng) {
+    return Promise.reject(new Error(`${img.name} 没有原始 alpha 数据`));
+  }
+  const p = new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => {
+      const c = makeCanvas(im.width, im.height);
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(im, 0, 0);
+      const d = ctx.getImageData(0, 0, im.width, im.height).data;
+      const out = new Uint8Array(im.width * im.height);
+      for (let i = 0, p = 0; i < out.length; i++, p += 4) out[i] = d[p];
+      res(out);
+    };
+    im.onerror = () => rej(new Error("alpha PNG 解码失败"));
+    im.src = "data:image/png;base64," + img.alphaPng;
+  });
+  alphaRefCache.set(img.name, p);
+  return p;
+}
+
+// --------------------------------------------------------------------------- //
+// 工具
+// --------------------------------------------------------------------------- //
+
+function human(n) {
+  const u = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  while (Math.abs(n) >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n.toFixed(0) : n.toFixed(2)) + " " + u[i];
+}
+
+/**
+ * JPEG 解码缓存,按 base64 内容做键(LRU,上限 BMP_CACHE_MAX 条)。
+ *
+ * 之前用记录对象当键,但一张图有多个质量档、`_refCanvas` 和 `_rebuiltCanvas`
+ * 又是两份不同的 JPEG,共用一个槽位会互相踢掉,越用越慢。
+ */
+const bmpLRU = new Map();     // b64 -> Promise<HTMLImageElement>
+const BMP_CACHE_MAX = 24;
+
+function decodeB64Jpeg(b64) {
+  const hit = bmpLRU.get(b64);
+  if (hit) {
+    // 命中后挪到末尾,维持 LRU 顺序
+    bmpLRU.delete(b64);
+    bmpLRU.set(b64, hit);
+    return hit;
+  }
+  const p = new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => { bmpLRU.delete(b64); rej(new Error("JPEG 解码失败")); };
+    im.src = "data:image/jpeg;base64," + b64;
+  });
+  bmpLRU.set(b64, p);
+  while (bmpLRU.size > BMP_CACHE_MAX) {
+    bmpLRU.delete(bmpLRU.keys().next().value);
+  }
+  return p;
+}
+
+function makeCanvas(w, h) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  return c;
+}
+
+// --------------------------------------------------------------------------- //
+// 状态
+// --------------------------------------------------------------------------- //
+
+const DATA = window.AJPEG_DATA;
+const state = {
+  idx: 0,
+  q: 85,
+  view: "side",        // side | split | alpha
+  src: "ajpeg",        // side 视图里左边显示哪个:ajpeg | orig
+  err: false,
+  zoom: false,
+  space: false,
+  split: 0.5,
+  mouse: null,         // {x, y} 归一化到图内
+  rleMode: "best",     // 导入时 alpha 的编码方式
+};
+
+const el = (id) => document.getElementById(id);
+
+// 导入图片时会往里加新的质量档,所以必须是可变的
+const QUALITIES = (() => {
+  const s = new Set();
+  DATA.images.forEach(im => im.qualities.forEach(q => s.add(q.q)));
+  return [...s].sort((a, b) => a - b);
+})();
+
+function currentImage() { return DATA.images[state.idx]; }
+
+/**
+ * 取当前质量档。
+ *
+ * 滑杆是自由的 1~100,不吸附 —— 先把数据里已有的档建成索引;缺档的话由
+ * ensureQuality() 现编一个。这里只做查找,不返回"最近的一档",否则滑杆会被
+ * 拉回离散档位、看着像拖不动。
+ */
+function currentQuality() {
+  const img = currentImage();
+  return img.qualities.find(q => q.q === state.q) || img.qualities[0];
+}
+
+/** 没有现成档、又编不出新档时(来自 data.js 的图),退到最接近的一档。 */
+function nearestQuality(img, q) {
+  let best = img.qualities[0];
+  for (const x of img.qualities) if (Math.abs(x.q - q) < Math.abs(best.q - q)) best = x;
+  return best.q;
+}
+
+// --------------------------------------------------------------------------- //
+// 渲染
+// --------------------------------------------------------------------------- //
+
+let renderToken = 0;
+
+/** 主区画布的渲染结果缓存。切视图/切质量时,只有真正变了才重画。 */
+const paneStore = {};
+
+async function render() {
+  const token = ++renderToken;
+  const img = currentImage();
+  const q = currentQuality();
+  const W = img.width, H = img.height;
+
+  // ---- 原图画布:参考 JPEG(RGB) + 原图 alpha = 真实原图 ----
+  const alphaRef = await decodeAlphaPng(img);
+  if (token !== renderToken) return;
+
+  const ref = await compositeCanvas(img.viewJpeg, alphaRef, W, H, img, "_refCanvas");
+  if (token !== renderToken) return;
+
+  // ---- AJPEG 重建画布:JPEG + RLE 解出的 alpha ----
+  const alpha = decodeAlpha(img);
+  const rebuilt = await compositeCanvas(q.jpeg, alpha, W, H, img, "_rebuiltCanvas");
+  if (token !== renderToken) return;
+
+  // ---- 校验:RLE 解出的 alpha vs 原图 alpha ----
+  checkAlpha(img, alpha, alphaRef);
+
+  // ---- 主区 ----
+  const host = el("panes");
+  host.innerHTML = "";
+  host.classList.toggle("grid2", state.view === "alpha");
+
+  if (state.view === "alpha") {
+    // 第一格:原图 alpha
+    const grayRef = paneStore.grayRef
+      || (paneStore.grayRef = renderAlphaGray(alphaRef, W, H));
+    // 第二格:转换后 alpha(RLE 解出)
+    const gray = paneStore.alphaGray
+      || (paneStore.alphaGray = renderAlphaGray(alpha, W, H));
+    // 第三格:两者差异
+    const diff = paneStore.alphaDiff
+      || (paneStore.alphaDiff = renderAlphaDiff(alpha, alphaRef, W, H));
+    // 第四格:转换后的 JPEG 本体 —— 不带 alpha,直接看压缩失真
+    if (!paneStore.bareKey || paneStore.bareKey !== q.jpeg) {
+      paneStore.bare = await renderBareJpeg(q.jpeg, W, H);
+      paneStore.bareKey = q.jpeg;
+    }
+    const bare = paneStore.bare;
+
+    host.appendChild(pane(T("paneOrigAlpha"), "o", grayRef,
+      T("subOrigAlpha", W, H), origBadge(img)));
+    host.appendChild(pane(T("paneConvAlpha"), "e", gray,
+      T("subConvAlpha", W, H, human(img.alpha.block_bytes)),
+      `${img.alpha.algo === 0 ? "RLE" : "RAW"}\n${human(img.alpha.block_bytes)}`));
+    host.appendChild(pane(T("paneAlphaDiff"), "b", diff, diffSub(alpha, alphaRef),
+      alphaLossless(alpha, alphaRef) ? T("badgeLossless") : T("badgeLossy")));
+    host.appendChild(pane(T("paneBareJpeg"), "a", bare,
+      T("subBareJpeg", human(q.jpeg_bytes), q.q, q.sampling),
+      `${T("badgeJpegOnly")}\n${human(q.jpeg_bytes)}`));
+  } else if (state.view === "split") {
+    host.appendChild(splitPane(ref, rebuilt, W, H, q));
+  } else {
+    const showRef = state.space || state.src === "orig";
+    const shown = showRef ? ref : rebuilt;
+    const cap = showRef ? T("paneOrig") : T("paneRebuilt");
+    const sub = showRef ? origSub(img, W, H) : ajpegSub(img, q);
+    host.appendChild(pane(cap, showRef ? "o" : "a", shown, sub,
+      showRef ? origBadge(img) : ajpegBadge(img, q)));
+
+    if (state.err) {
+      const diff = paneStore.diff || (paneStore.diff = renderDiff(ref, rebuilt, W, H));
+      host.appendChild(pane(T("paneDiffMap"), "b", diff, T("subDiffMap")));
+    } else {
+      const other = showRef ? rebuilt : ref;
+      host.appendChild(pane(showRef ? T("paneRebuilt") : T("paneOrig"),
+        showRef ? "a" : "o", other,
+        showRef ? ajpegSub(img, q) : origSub(img, W, H),
+        showRef ? ajpegBadge(img, q) : origBadge(img)));
+    }
+  }
+
+  // ---- 放大镜 ----
+  if (state.zoom && state.mouse) {
+    const src = (state.space || state.src === "orig") ? ref : rebuilt;
+    host.appendChild(pane(T("paneZoom"), "b",
+      renderZoom(src, W, H, state.mouse),
+      T("subZoom", Math.round(state.mouse.x * W), Math.round(state.mouse.y * H))));
+  }
+}
+
+/**
+ * 把 JPEG 解出来、贴上 alpha,得到一张可用的画布。
+ *
+ * 结果缓存到 cacheKey 上 —— 切视图 / 拖动分屏时会反复调用,不缓存的话
+ * 每次都要 getImageData + 逐像素回写,大图会明显卡。
+ */
+async function compositeCanvas(jpegB64, alpha, W, H, cacheKey, slot) {
+  if (cacheKey) {
+    const hit = cacheKey[slot];
+    if (hit && hit.src === jpegB64 && hit.alpha === alpha) return hit.canvas;
+  }
+  const bmp = await decodeB64Jpeg(jpegB64);
+  const c = makeCanvas(W, H);
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0, W, H);
+  const id = ctx.getImageData(0, 0, W, H);
+  const px = id.data;
+  const n = Math.min(alpha.length, W * H);
+  for (let i = 0, p = 3; i < n; i++, p += 4) px[p] = alpha[i];
+  ctx.putImageData(id, 0, 0);
+  if (cacheKey) cacheKey[slot] = { canvas: c, src: jpegB64, alpha };
+  return c;
+}
+
+// --------------------------------------------------------------------------- //
+// 原图 / AJPEG 的副标题与左下角角标
+// --------------------------------------------------------------------------- //
+
+function origSub(img, W, H) {
+  return T("subOrig", W, H);
+}
+
+/** 原图角标:文件名 + 原始文件大小。这是"转换前"的基准。 */
+function origBadge(img) {
+  return img.png_bytes ? `${img.name}\n${human(img.png_bytes)}` : img.name;
+}
+
+function ajpegSub(img, q) {
+  return T("subRebuilt", human(q.jpeg_bytes), human(img.alpha.block_bytes));
+}
+
+/** AJPEG 角标:总大小,以及相对原图的压缩率 —— 直接对比,不用心算。 */
+function ajpegBadge(img, q) {
+  const total = q.ajpeg_bytes;
+  const lines = [`AJPEG q${q.q}`, human(total)];
+  if (img.png_bytes) {
+    const d = (total / img.png_bytes - 1) * 100;
+    lines[1] += `  ${d >= 0 ? "+" : ""}${d.toFixed(1)}%`;
+  }
+  return lines.join("\n");
+}
+
+function pane(caption, tagClass, canvas, sub, badge) {
+  const d = document.createElement("div");
+  d.className = "pane";
+  const cap = document.createElement("div");
+  cap.className = "cap";
+  cap.innerHTML = `<span class="tag ${tagClass}">${tagClass.toUpperCase()}</span>${caption}`;
+  const s = document.createElement("div");
+  s.className = "sub";
+  s.textContent = sub || "";
+  canvas.classList.add("checker");
+
+  // 画布包一层,好把角标压在左下角(画布本身是 replaced element,没法挂子节点)
+  const wrap = document.createElement("div");
+  wrap.className = "cvwrap";
+  wrap.appendChild(canvas);
+  if (badge) {
+    const b = document.createElement("div");
+    b.className = "cvbadge";
+    b.textContent = badge;
+    wrap.appendChild(b);
+  }
+
+  d.append(cap, wrap, s);
+  return d;
+}
+
+function splitPane(ref, rebuilt, W, H, q) {
+  const wrap = document.createElement("div");
+  wrap.id = "splitWrap";
+  wrap.appendChild(pane(T("paneSplit"), "a", makeCanvas(W, H), ""));
+
+  const c = wrap.querySelector("canvas");
+  const ctx = c.getContext("2d");
+  const line = document.createElement("div");
+  line.id = "splitLine";
+  wrap.appendChild(line);
+
+  const draw = () => {
+    const sx = Math.round(state.split * W);
+    ctx.clearRect(0, 0, W, H);
+    ctx.drawImage(ref, 0, 0, sx, H, 0, 0, sx, H);
+    ctx.drawImage(rebuilt, sx, 0, W - sx, H, sx, 0, W - sx, H);
+    line.style.left = (state.split * 100) + "%";
+    wrap.querySelector(".sub").textContent =
+      T("subSplit", Math.round(state.split * 100), q.q);
+  };
+  draw();
+
+  let dragging = false;
+  const move = (e) => {
+    const r = c.getBoundingClientRect();
+    state.split = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    draw();
+  };
+  wrap.addEventListener("pointerdown", (e) => { dragging = true; wrap.setPointerCapture(e.pointerId); move(e); });
+  wrap.addEventListener("pointermove", (e) => { if (dragging) move(e); });
+  wrap.addEventListener("pointerup", () => { dragging = false; });
+  return wrap;
+}
+
+function renderAlphaGray(alpha, W, H) {
+  const c = makeCanvas(W, H);
+  const id = new ImageData(W, H);
+  for (let i = 0, p = 0; i < alpha.length; i++, p += 4) {
+    id.data[p] = id.data[p + 1] = id.data[p + 2] = alpha[i];
+    id.data[p + 3] = 255;
+  }
+  c.getContext("2d").putImageData(id, 0, 0);
+  return c;
+}
+
+/**
+ * 转换后的 JPEG 本体:不贴任何 alpha,alpha 全置 255。
+ * 用来看「单独一个 JPEG 长什么样」—— 透明区会显示成编码器填的底色,
+ * 这正是把它当普通 .jpg 打开时看到的东西。
+ */
+async function renderBareJpeg(jpegB64, W, H) {
+  const bmp = await decodeB64Jpeg(jpegB64);
+  const c = makeCanvas(W, H);
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0, W, H);
+  const id = ctx.getImageData(0, 0, W, H);
+  for (let p = 3; p < id.data.length; p += 4) id.data[p] = 255;
+  ctx.putImageData(id, 0, 0);
+  return c;
+}
+
+/**
+ * alpha 差异图:逐像素比「原图 alpha」和「转换后 alpha」。
+ *
+ * RLE 是无损的,所以正常情况下这一格必须是**全黑**(没有任何差异)。
+ * 一致 = 纯黑,不一致 = 红色(亮度按差值放大,Δ=1 也看得见)。
+ *
+ * 之前一致的地方画的是 alpha 本身的压暗版,看着像"有内容",容易误判。
+ */
+function renderAlphaDiff(alpha, ref, W, H) {
+  const c = makeCanvas(W, H);
+  const id = new ImageData(W, H);
+  const ok = ref && ref.length === alpha.length;
+  for (let i = 0, p = 0; i < alpha.length; i++, p += 4) {
+    const d = ok ? Math.abs(alpha[i] - ref[i]) : 255;   // 没有参照就全标红
+    if (d === 0) {
+      id.data[p] = id.data[p + 1] = id.data[p + 2] = 0;  // 无差异:纯黑
+    } else {
+      id.data[p] = 255;
+      id.data[p + 1] = id.data[p + 2] = Math.max(0, 90 - d * 3);
+    }
+    id.data[p + 3] = 255;
+  }
+  c.getContext("2d").putImageData(id, 0, 0);
+  return c;
+}
+
+/** 两个 alpha 是否逐字节相同(RLE 无损,正常情况恒为 true)。 */
+function alphaLossless(a, ref) {
+  if (!ref || ref.length !== a.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== ref[i]) return false;
+  return true;
+}
+
+/** 差异格的副标题:直接报不一致的像素数,0 就是预期结果。 */
+function diffSub(alpha, ref) {
+  const n = alpha.length;
+  let opaque = 0, mismatch = 0, maxD = 0;
+  const ok = ref && ref.length === n;
+  for (let i = 0; i < n; i++) {
+    if (alpha[i] === 255) opaque++;
+    if (ok) {
+      const d = Math.abs(alpha[i] - ref[i]);
+      if (d) { mismatch++; if (d > maxD) maxD = d; }
+    }
+  }
+  const pct = (v) => (v / n * 100).toFixed(1);
+  if (!ok) return T("diffNoRef");
+  return mismatch === 0
+    ? T("diffSame", pct(opaque))
+    : T("diffDiff", mismatch.toLocaleString(), maxD, pct(opaque));
+}
+
+function renderDiff(ref, rebuilt, W, H) {
+  const a = ref.getContext("2d").getImageData(0, 0, W, H).data;
+  const b = rebuilt.getContext("2d").getImageData(0, 0, W, H).data;
+  const c = makeCanvas(W, H);
+  const id = new ImageData(W, H);
+  for (let i = 0; i < a.length; i += 4) {
+    const d = (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2])) / 3;
+    const v = Math.min(255, d * 8);
+    id.data[i] = v;
+    id.data[i + 1] = v * 0.55;
+    id.data[i + 2] = 255 - v;
+    id.data[i + 3] = 255;
+  }
+  c.getContext("2d").putImageData(id, 0, 0);
+  return c;
+}
+
+function renderZoom(src, W, H, m) {
+  const size = 120, z = 4;
+  const cx = Math.round(m.x * W), cy = Math.round(m.y * H);
+  const half = Math.floor(size / z / 2);
+  const sx = Math.max(0, Math.min(W - half * 2, cx - half));
+  const sy = Math.max(0, Math.min(H - half * 2, cy - half));
+  const c = makeCanvas(size, size);
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(src, sx, sy, half * 2, half * 2, 0, 0, size, size);
+  return c;
+}
+
+// --------------------------------------------------------------------------- //
+// 校验 / 统计
+// --------------------------------------------------------------------------- //
+
+function checkAlpha(img, alpha, ref) {
+  const box = el("verify");
+  const want = img.alpha.adler32 >>> 0;
+  const got = adler32(alpha);
+  const n = img.width * img.height;
+
+  if (alpha.length !== n) {
+    box.className = "bad";
+    box.textContent = T("verifyLen", alpha.length, n);
+    return;
+  }
+
+  // 与浏览器独立解出的原图 alpha 逐像素比对
+  let mismatched = 0, maxDelta = 0;
+  if (ref && ref.length === alpha.length) {
+    for (let i = 0; i < alpha.length; i++) {
+      const d = Math.abs(alpha[i] - ref[i]);
+      if (d) { mismatched++; if (d > maxDelta) maxDelta = d; }
+    }
+  }
+
+  const small = document.createElement("div");
+  small.style.cssText = "opacity:.55;font-size:9.5px;margin-top:3px;font-weight:400";
+  small.textContent = T("verifySum", n.toLocaleString(),
+    got.toString(16).padStart(8, "0"));
+
+  if (got === want && mismatched === 0) {
+    box.className = "ok";
+    box.innerHTML = T("verifyOk", n.toLocaleString());
+    box.appendChild(small);
+  } else {
+    box.className = "bad";
+    box.innerHTML = got !== want
+      ? T("verifyBadSum", got.toString(16), want.toString(16))
+      : T("verifyBadPx", mismatched, maxDelta);
+    box.appendChild(small);
+  }
+}
+
+function updateStats() {
+  const img = currentImage();
+  const q = currentQuality();
+  const a = img.alpha;
+  const total = q.ajpeg_bytes;
+
+  // 每行:[i18n key, 显示值, 备注]。高亮按 key 判断,不能按翻译后的文本。
+  const rows = [
+    ["statOrigFile", human(img.png_bytes), ""],
+    ["statJpeg", human(q.jpeg_bytes), `q${q.q} · ${q.sampling}`],
+    ["statAlpha", human(a.block_bytes),
+      `${a.algo === 0 ? "RLE" : "RAW"} · ${(a.payload_bytes / a.raw_alpha_bytes * 100).toFixed(1)}% ${T("ofRaw")}`],
+    ["statTotal", `<b>${human(total)}</b>`, ""],
+    ["statVsOrig", img.png_bytes
+      ? ((total / img.png_bytes - 1) * 100 >= 0 ? "+" : "")
+        + ((total / img.png_bytes - 1) * 100).toFixed(1) + "%"
+      : "—", ""],
+    ["statBpp", q.bpp.toFixed(3), T("statBppNote")],
+    ["statPsnr", q.psnr == null ? "∞" : q.psnr.toFixed(2), ""],
+    ["statSsim", q.ssim.toFixed(4), ""],
+  ];
+
+  el("stats").innerHTML = rows.map(([key, v, note]) => `
+    <div class="row ${key === "statTotal" ? "hi" : ""}">
+      <span class="k">${T(key)}</span>
+      <span class="v" ${note ? `title="${note}"` : ""}>${v}${note ? `<span style="opacity:.35;font-size:10.5px"> ·${note}</span>` : ""}</span>
+    </div>`).join("");
+
+  const jw = q.jpeg_bytes / total * 100;
+  el("barJpeg").style.width = jw + "%";
+  el("barAlpha").style.width = (100 - jw) + "%";
+}
+
+// --------------------------------------------------------------------------- //
+// 交互
+// --------------------------------------------------------------------------- //
+
+/**
+ * 同步滑杆显示。只写标签,不回写 value —— 回写会把用户拖到的位置改成
+ * 吸附后的离散档,表现就是"滑杆拖不动"。
+ */
+function syncQualitySlider() {
+  el("qVal").textContent = state.q;
+  if (+el("rngQ").value !== state.q) el("rngQ").value = state.q;
+}
+
+/** 清掉主区缓存。切图/切质量时必须调用,否则会显示上一张的渲染结果。 */
+function invalidatePaneCache() {
+  paneStore.grayRef = null;
+  paneStore.alphaGray = null;
+  paneStore.alphaDiff = null;
+  paneStore.diff = null;
+  paneStore.bare = null;
+  paneStore.bareKey = null;
+}
+
+function rerender() {
+  invalidatePaneCache();
+  syncQualitySlider();
+  updateStats();
+  render();
+}
+
+function setView(v) {
+  state.view = v;
+  el("vSide").setAttribute("aria-pressed", v === "side");
+  el("vSplit").setAttribute("aria-pressed", v === "split");
+  el("vAlpha").setAttribute("aria-pressed", v === "alpha");
+  render();
+}
+
+// --------------------------------------------------------------------------- //
+// 本地导入:在浏览器里实时转成 AJPEG
+// --------------------------------------------------------------------------- //
+
+async function blobToBytes(blob) {
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+/**
+ * 把浏览器编码出来的 JPEG 字节转成查看器用的 data 记录,并跑一遍回环校验。
+ *
+ * 注意:浏览器 canvas 的 JPEG 编码器不暴露采样设置,实际是 4:2:0 还是 4:4:4
+ * 要看码流里的 SOF —— 所以这里解析出来如实显示,而不是假设。
+ */
+async function convertToAJPEG(name, bitmap, quality, srcBytes) {
+  const W = bitmap.width, H = bitmap.height;
+
+  // 1) 编码 JPEG
+  const canvas = makeCanvas(W, H);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bitmap, 0, 0);
+  const src = ctx.getImageData(0, 0, W, H);
+  const jpegBlob = await new Promise(res =>
+    canvas.toBlob(res, "image/jpeg", quality / 100));
+  const jpeg = await blobToBytes(jpegBlob);
+
+  // 2) 拆 alpha(非预乘)
+  const alpha = new Uint8Array(W * H);
+  const px = src.data;
+  const hasAlpha = (() => {
+    for (let p = 3; p < px.length; p += 4) if (px[p] !== 255) return true;
+    return false;
+  })();
+  for (let i = 0, p = 3; i < alpha.length; i++, p += 4) alpha[i] = px[p];
+
+  // 3) 打 alpha 块并拼接
+  const info = buildAlphaBlock(alpha, W, H, state.rleMode);
+  const built = buildAJPEG(jpeg, info.block);
+
+  // 4) 回环:从拼好的文件里反解,必须和刚才的 alpha 完全一致
+  const back = parseAJPEG(built.file);
+  let mismatch = 0;
+  if (back.alpha.length !== alpha.length) mismatch = -1;
+  else for (let i = 0; i < alpha.length; i++) if (back.alpha[i] !== alpha[i]) mismatch++;
+
+  // 5) 画质指标(和 Python 那边同口径)
+  const jpegBmp = await decodeB64Jpeg(bytesToB64(jpeg));
+  const dec = makeCanvas(W, H);
+  const dctx = dec.getContext("2d", { willReadFrequently: true });
+  dctx.drawImage(jpegBmp, 0, 0);
+  const decData = dctx.getImageData(0, 0, W, H).data;
+  const { psnr, ssim } = psnrSsim(px, decData, W, H);
+
+  const jinfo = parseJpeg(jpeg);
+  const sampling = samplingLabel(jinfo);
+
+  // 原图 alpha 直接复用:不再走一张 PNG
+  alphaRefCache.set(name, Promise.resolve(alpha));
+
+  return {
+    name,
+    width: W,
+    height: H,
+    // 原始文件大小。之前这里错写成 jpegBlob.size(编码后 JPEG 的体积),
+    // 导致「PNG 原图」和「vs PNG」两个数字都是错的。
+    png_bytes: srcBytes || 0,
+    alpha_png_bytes: 0,
+    has_alpha: hasAlpha,
+    viewJpeg: bytesToB64(jpeg),
+    alphaPng: null,                    // 由 alphaRefCache 直接提供
+    alpha: {
+      algo: info.algo, adler32: adler32(alpha),
+      payload: bytesToB64(info.block.subarray(16 + 4 * (H + 1))),
+      offsets: readOffsets(info.block, H),
+      block_bytes: info.blockBytes, payload_bytes: info.payloadBytes,
+      raw_alpha_bytes: info.rawBytes, table_bytes: info.tableBytes,
+      rle_bytes: info.rleBytes, rle_nodes: info.rleNodes,
+    },
+    qualities: [{
+      q: quality,
+      jpeg: bytesToB64(jpeg),
+      jpeg_bytes: built.jpegSize,
+      ajpeg_bytes: built.file.length,
+      psnr: psnr === Infinity ? null : Math.round(psnr * 100) / 100,
+      ssim: Math.round(ssim * 100000) / 100000,
+      bpp: Math.round(built.file.length * 8 / (W * H) * 1000) / 1000,
+      vs_png: srcBytes ? Math.round(built.file.length / srcBytes * 10000) / 10000 : 0,
+      sampling,
+      verify: mismatch === 0,
+    }],
+    // 保留源像素:滑杆拖到没编过的质量时需要重新编码。不进 data.js,只在内存里。
+    _rgba: new Uint8ClampedArray(px),
+    _alpha: alpha,
+    _built: built.file,
+    _mismatch: mismatch,
+  };
+}
+
+/**
+ * 给当前图补编一个质量档(滑杆拖到数据里没有的 q 时调用)。
+ * 已有则直接返回。编码失败不抛,交给调用方显示。
+ */
+async function ensureQuality(q) {
+  const img = currentImage();
+  if (img.qualities.some(x => x.q === q)) return true;
+
+  // 导入的图有原始像素;来自 data.js 的示例图没有,得先从已有的
+  // viewJpeg(RGB)+ alphaPng(alpha)反推一份出来。
+  let rgba = img._rgba;
+  if (!rgba) {
+    const src = await buildSourcePixels(img);
+    if (!src) return false;
+    rgba = img._rgba = src.rgba;
+    img._alpha = src.alpha;
+  }
+
+  const W = img.width, H = img.height;
+  const canvas = makeCanvas(W, H);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.putImageData(new ImageData(rgba, W, H), 0, 0);
+
+  const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", q / 100));
+  if (!blob) return false;
+  const jpeg = await blobToBytes(blob);
+
+  const built = buildAJPEG(jpeg, buildAlphaBlock(img._alpha, W, H, state.rleMode).block);
+
+  const jpegBmp = await decodeB64Jpeg(bytesToB64(jpeg));
+  const dec = makeCanvas(W, H);
+  const dctx = dec.getContext("2d", { willReadFrequently: true });
+  dctx.drawImage(jpegBmp, 0, 0);
+  const { psnr, ssim } = psnrSsim(rgba, dctx.getImageData(0, 0, W, H).data, W, H);
+
+  const jinfo = parseJpeg(jpeg);
+  img.qualities.push({
+    q,
+    jpeg: bytesToB64(jpeg),
+    jpeg_bytes: built.jpegSize,
+    ajpeg_bytes: built.file.length,
+    psnr: psnr === Infinity ? null : Math.round(psnr * 100) / 100,
+    ssim: Math.round(ssim * 100000) / 100000,
+    bpp: Math.round(built.file.length * 8 / (W * H) * 1000) / 1000,
+    vs_png: img.png_bytes ? Math.round(built.file.length / img.png_bytes * 10000) / 10000 : 0,
+    sampling: samplingLabel(jinfo),
+    verify: true,
+    computed: true,        // 标记:浏览器现编,不是 data.js 里 Python 算的
+  });
+  img.qualities.sort((a, b) => a.q - b.q);
+  return true;
+}
+
+/**
+ * 从示例图记录反推原始 RGBA。
+ *
+ * data.js 只带了 viewJpeg(4:4:4 q98 的 RGB)和 alphaPng(原始 alpha),
+ * 没有原始 PNG 像素。用这两者拼出的 RGBA 足够做质量对比 —— 唯一代价是
+ * RGB 侧已经过一遍 q98 无损近似,所以高质量档的 PSNR 会略微偏保守。
+ */
+async function buildSourcePixels(img) {
+  try {
+    const W = img.width, H = img.height;
+    const [bmp, alpha] = await Promise.all([
+      decodeB64Jpeg(img.viewJpeg),
+      decodeAlphaPng(img),
+    ]);
+    const c = makeCanvas(W, H);
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bmp, 0, 0, W, H);
+    const id = ctx.getImageData(0, 0, W, H);
+    const n = Math.min(alpha.length, W * H);
+    for (let i = 0, p = 3; i < n; i++, p += 4) id.data[p] = alpha[i];
+    return { rgba: new Uint8ClampedArray(id.data), alpha };
+  } catch (err) {
+    console.warn("无法反推源像素:", err);
+    return null;
+  }
+}
+
+function readOffsets(block, height) {
+  const view = new DataView(block.buffer, block.byteOffset, block.byteLength);
+  const out = new Array(height + 1);
+  for (let i = 0; i <= height; i++) out[i] = view.getUint32(16 + i * 4, true);
+  return out;
+}
+
+function bytesToB64(bytes) {
+  let s = "";
+  const CH = 0x8000;                      // 分块,避免栈溢出
+  for (let i = 0; i < bytes.length; i += CH) {
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  }
+  return btoa(s);
+}
+
+/** PSNR + SSIM,口径与 make_ajpeg.py 一致(SSIM 用 11×11 高斯窗 σ=1.5)。 */
+function psnrSsim(a, b, W, H) {
+  // 只算 RGB 三通道(跳过 alpha),与 make_ajpeg.py 的 psnr_rgb 同口径。
+  // 输入是 canvas 的 RGBA,每像素 4 字节。
+  let sum = 0, n = W * H * 3;
+  for (let i = 0, p = 0; i < W * H; i++, p += 4) {
+    let d = a[p] - b[p];     sum += d * d;
+    d = a[p + 1] - b[p + 1]; sum += d * d;
+    d = a[p + 2] - b[p + 2]; sum += d * d;
+  }
+  const mse = sum / n;
+  const psnr = mse === 0 ? Infinity : 10 * Math.log10(255 * 255 / mse);
+
+  // SSIM 是全图高斯卷积,大图很贵。超过这个规模就按整数步长抽稀采样 ——
+  // 只用于导入时的即时估算,精确值以 make_ajpeg.py 的 metrics.json 为准。
+  const SSIM_MAX_PX = 640 * 640;
+  const stride = Math.max(1, Math.ceil(Math.sqrt(W * H / SSIM_MAX_PX)));
+  const SW = Math.ceil(W / stride), SH = Math.ceil(H / stride);
+
+  // 亮度通道(按 stride 抽稀)
+  const la = new Float64Array(SW * SH), lb = new Float64Array(SW * SH);
+  for (let y = 0; y < SH; y++) {
+    for (let x = 0; x < SW; x++) {
+      const sp = ((y * stride) * W + x * stride) * 4;
+      const i = y * SW + x;
+      la[i] = 0.299 * a[sp] + 0.587 * a[sp + 1] + 0.114 * a[sp + 2];
+      lb[i] = 0.299 * b[sp] + 0.587 * b[sp + 1] + 0.114 * b[sp + 2];
+    }
+  }
+  return { psnr, ssim: ssimLuma(la, lb, SW, SH), sampled: stride > 1 };
+}
+
+/** SSIM,11×11 高斯窗 σ=1.5(可分离实现),输入已是亮度数组。 */
+function ssimLuma(la, lb, W, H) {
+  const N = W * H;
+  const aa = new Float64Array(N), bb = new Float64Array(N), ab = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    aa[i] = la[i] * la[i];
+    bb[i] = lb[i] * lb[i];
+    ab[i] = la[i] * lb[i];
+  }
+  const ma = gaussBlur(la, W, H), mb = gaussBlur(lb, W, H);
+  const maa = gaussBlur(aa, W, H), mbb = gaussBlur(bb, W, H), mab = gaussBlur(ab, W, H);
+  const C1 = (0.01 * 255) ** 2, C2 = (0.03 * 255) ** 2;
+  let acc = 0;
+  for (let i = 0; i < N; i++) {
+    const va = maa[i] - ma[i] * ma[i], vb = mbb[i] - mb[i] * mb[i];
+    const cov = mab[i] - ma[i] * mb[i];
+    acc += ((2 * ma[i] * mb[i] + C1) * (2 * cov + C2)) /
+           ((ma[i] * ma[i] + mb[i] * mb[i] + C1) * (va + vb + C2));
+  }
+  return acc / N;
+}
+
+/** 可分离高斯,σ=1.5,半径 5(和 Python 的 11×11 窗同尺寸)。 */
+/**
+ * 可分离高斯,11 点窗(半径 5),σ=1.5 —— 与 Python 的 gaussian_filter(σ=1.5,
+ * truncate=10/3) 以及标准 SSIM 的 11×11 窗一致。核值和为 1。
+ */
+const GAUSS_K = (() => {
+  const r = 5, sigma = 1.5, k = [];
+  let sum = 0;
+  for (let t = -r; t <= r; t++) {
+    const v = Math.exp(-(t * t) / (2 * sigma * sigma));
+    k.push(v); sum += v;
+  }
+  return k.map(v => v / sum);
+})();
+const GAUSS_R = 5;
+
+function gaussBlur(src, W, H) {
+  const k = GAUSS_K, R = GAUSS_R;
+  const tmp = new Float64Array(W * H), out = new Float64Array(W * H);
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    for (let x = 0; x < W; x++) {
+      let s = 0;
+      for (let t = -R; t <= R; t++) {
+        // 边界反射(与 scipy 的 mode="reflect" 同语义)
+        let xx = x + t;
+        if (xx < 0) xx = -xx - 1; else if (xx >= W) xx = 2 * W - xx - 1;
+        s += src[row + xx] * k[t + R];
+      }
+      tmp[row + x] = s;
+    }
+  }
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let s = 0;
+      for (let t = -R; t <= R; t++) {
+        let yy = y + t;
+        if (yy < 0) yy = -yy - 1; else if (yy >= H) yy = 2 * H - yy - 1;
+        s += tmp[yy * W + x] * k[t + R];
+      }
+      out[y * W + x] = s;
+    }
+  }
+  return out;
+}
+
+async function importFiles(files) {
+  const imgs = [...files].filter(f => f.type.startsWith("image/"));
+  if (!imgs.length) { setNote(T("noImportable"), true); return; }
+
+  setNote(T("converting", imgs.length));
+  const q = Math.round(state.q);
+
+  for (const f of imgs) {
+    try {
+      const bitmap = await createImageBitmap(f);
+      const rec = await convertToAJPEG(f.name, bitmap, q, f.size);
+      bitmap.close();
+
+      // 同名则替换,避免列表里堆重复项
+      const at = DATA.images.findIndex(x => x.name === rec.name);
+      if (at >= 0) DATA.images[at] = rec; else DATA.images.push(rec);
+
+      const qi = QUALITIES.indexOf(q);
+      if (qi < 0) { QUALITIES.push(q); QUALITIES.sort((a, b) => a - b); }
+    } catch (err) {
+      setNote(T("importFailed", f.name, err.message), true);
+      console.error(err);
+    }
+  }
+
+  refreshImageSelect();
+  state.idx = DATA.images.findIndex(x => x.name === imgs[imgs.length - 1].name);
+  invalidatePaneCache();
+  rerender();
+  const last = DATA.images[state.idx];
+  const ok = last && last.qualities[0].verify;
+  setNote(T("imported", imgs.length, ok), !ok);
+}
+
+function setNote(text, isError) {
+  const n = el("importNote");
+  n.textContent = text || "";
+  n.className = isError ? "bad" : "";
+}
+
+function refreshImageSelect() {
+  el("selImg").innerHTML = DATA.images
+    .map((im, i) => `<option value="${i}">${im.name} · ${im.width}×${im.height}`
+      + (im.qualities[0].sampling ? ` · ${im.qualities[0].sampling}` : "")
+      + `</option>`).join("");
+  el("selImg").value = state.idx;
+}
+
+/** 切换语言:刷静态文案 + 重绘动态部分。 */
+function setLang(lang) {
+  state_lang.lang = lang;
+  el("langZh").setAttribute("aria-pressed", lang === "zh");
+  el("langEn").setAttribute("aria-pressed", lang === "en");
+  try { localStorage.setItem("ajpeg-lang", lang); } catch (_) { /* file:// 下可能不可用 */ }
+
+  applyStaticText();
+
+  // applyStaticText 已经刷过 hint 里的 data-i18n span;没有数据时它显示的是
+  // 报错信息,需要单独覆盖回来。
+  if (!DATA.images || !DATA.images.length) {
+    el("hint").innerHTML = `<span class="err">${T("noData")}</span>`;
+    return;
+  }
+
+  invalidatePaneCache();
+  updateStats();
+  render();
+}
+
+function init() {
+  // 语言:URL 参数 > localStorage > 浏览器语言 > 中文
+  const urlLang = new URLSearchParams(location.search).get("lang");
+  let saved = null;
+  try { saved = localStorage.getItem("ajpeg-lang"); } catch (_) { /* ignore */ }
+  const guess = urlLang || saved
+    || ((navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en");
+  state_lang.lang = I18N[guess] ? guess : "zh";
+
+  applyStaticText();
+  el("langZh").addEventListener("click", () => setLang("zh"));
+  el("langEn").addEventListener("click", () => setLang("en"));
+  el("langZh").setAttribute("aria-pressed", state_lang.lang === "zh");
+  el("langEn").setAttribute("aria-pressed", state_lang.lang === "en");
+
+  if (!window.AJPEGDecode) {
+    el("hint").innerHTML = `<span class="err">${T("noDecoder")}</span>`;
+    return;
+  }
+  DATA.images = (DATA.images || []);
+
+  if (!DATA.images.length) {
+    el("hint").innerHTML = `<span class="err">${T("noData")}</span>`;
+  }
+
+  refreshImageSelect();
+
+  // 质量滑杆:优先落在数据集里最接近 85 的档
+  state.q = QUALITIES.length
+    ? QUALITIES.reduce((a, b) => Math.abs(b - 85) < Math.abs(a - 85) ? b : a, QUALITIES[0])
+    : 85;
+
+  el("selImg").addEventListener("change", async (e) => {
+    state.idx = +e.target.value;
+    state.space = false;
+    // 新图可能没有当前档:能现编就现编,编不了就退到它已有的一档
+    const img = currentImage();
+    if (img && !img.qualities.some(x => x.q === state.q)) {
+      const ok = await ensureQuality(state.q);
+      if (!ok) {
+        setNote(T("onlyQ", img.qualities.map(x => "q" + x.q).join(" / ")), true);
+        state.q = nearestQuality(img, state.q);
+      }
+    }
+    rerender();
+  });
+
+  // ---- 导入 ----
+  const fileInput = el("fileInput");
+  el("btnFiles").addEventListener("click", () => {
+    fileInput.removeAttribute("webkitdirectory");
+    fileInput.click();
+  });
+  el("btnDir").addEventListener("click", () => {
+    fileInput.setAttribute("webkitdirectory", "");   // Chromium/Edge
+    fileInput.click();
+  });
+  fileInput.addEventListener("change", async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";                              // 允许重复选同一批
+    if (files.length) await importFiles(files);
+  });
+
+  // 滑杆自由拖动:拖动时立刻更新标签,编码做防抖,免得每一格都重新编码。
+  let qTimer = 0;
+  el("rngQ").addEventListener("input", (e) => {
+    state.q = +e.target.value;
+    el("qVal").textContent = state.q;
+    clearTimeout(qTimer);
+    qTimer = setTimeout(applyQuality, 90);
+  });
+
+  /** 质量档缺失时现编,然后重绘。 */
+  async function applyQuality() {
+    const img = currentImage();
+    if (!img) return;
+    const need = !img.qualities.some(x => x.q === state.q);
+    if (need) {
+      setNote(T("generating", state.q));
+      const can = await ensureQuality(state.q);
+      if (!can) {
+        setNote(T("genFailed", state.q), true);
+        return;
+      }
+      setNote(T("liveEncoded", state.q));
+    }
+    invalidatePaneCache();
+    updateStats();
+    render();
+  }
+
+  el("vSide").addEventListener("click", () => setView("side"));
+  el("vSplit").addEventListener("click", () => setView("split"));
+  el("vAlpha").addEventListener("click", () => setView("alpha"));
+
+  el("ckErr").addEventListener("change", (e) => { state.err = e.target.checked; render(); });
+  el("ckZoom").addEventListener("change", (e) => { state.zoom = e.target.checked; render(); });
+
+  // 空格按住看原图（在 select / input 上不要抢键）
+  const typing = (e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "Space" && !typing(e) && !state.space) {
+      e.preventDefault();
+      state.space = true;
+      render();
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.code === "Space" && state.space) {
+      state.space = false;
+      render();
+    }
+  });
+
+  // 放大镜跟随
+  el("panes").addEventListener("pointermove", (e) => {
+    if (!state.zoom) return;
+    const c = e.target.closest(".pane")?.querySelector("canvas");
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    state.mouse = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+    render();
+  });
+
+  rerender();
+}
+
+init();
+</script>
+</body>
+</html>

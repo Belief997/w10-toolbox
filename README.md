@@ -274,3 +274,125 @@ python make_frostglass.py --q00 4 8       # 换 DC 量化步长
 JS 侧的 box 迭代 / 双线性 / PSNR / SSIM 全部独立实现,与 Python 的 `metrics.json` 核对过 —— 最大偏差 **0.0106 dB / 0.00061 SSIM**(只有双线性取整的 ±1 灰阶差异),互为验证。
 
 1/8 小图必须由 Python 带过来:浏览器没有 libjpeg 的 `draft()` 缩放解码,拿不到"只读 DC"的那一层。
+
+---
+
+## AJPEG/ — PNG → JPEG(YUV 4:2:0) + 尾部 RLE alpha 的转换与压缩率对比
+
+把一张带透明通道的 PNG 拆成两半:**RGB 编成 baseline JPEG**(4:2:0,质量可调),**alpha 按 8 bit/像素取出后做 RLE 压缩**,再把 alpha 块拼到 JPEG 的 `FF D9` 之后。文件后缀仍然是 `.jpg`,任何图片查看器都能打开(只会看到不带透明度的 RGB 部分)。
+
+目的很直接:**量一下这个方案的压缩率**——尤其想看清楚 RLE 到底吃不吃 alpha 的形状。
+
+### 为什么 alpha 值得单独拎出来
+
+JPEG 本身没有 alpha。常见做法(如 `pngquant` / WebP)要么丢掉要么整段无损存 alpha,这里走的是「JPEG + 自定义 RLE alpha」的嵌入式路线,和 HoneyGUI `image-converter` 的 `imdc` 格式一脉相承。RLE 是逐行 `[len:1][byte:1]` 节点流,run 上限 255,与 `tools/image-converter/compress/rle.ts` 的 `compressLine` **逐字节一致**。
+
+所以压缩率**完全取决于 alpha 在水平方向上的连续度**:
+
+| 图 | alpha 形状 | raw | RLE | 压缩率 |
+|---|---|---|---|---|
+| `opaque.png` | 全不透明 | 212.07 KB | **1.82 KB** | 0.9% |
+| `alpha_sticker.png` | 圆角矩形 + 挖孔,硬边 | 212.07 KB | **3.53 KB** | 1.7% |
+| `alpha_sticker_inv.png` | 上一张的反相 | 212.07 KB | **3.53 KB** | 1.7% |
+| `alpha_soft.png` | 径向 + 线性软渐变 | 212.07 KB | **148.51 KB** | **70.0%** |
+
+`alpha_sticker_inv.png` 是 `alpha_sticker.png` 的 alpha 取反(前景/背景互换),用来看压缩率对 **alpha 极性**有多敏感。结论是**完全不敏感**:反相后 payload 大小、节点数、行偏移表全都一模一样。因为 RLE 只判断"相邻是否相同",而取反是 0↔255 一一映射,相邻关系不变。四张图实测:
+
+| 图 | 原 payload / 节点 | 反相后 | 偏移表 |
+|---|---|---|---|
+| `alpha_sticker` | 3,618 B / 1,809 | 3,618 B / 1,809 | 相同 |
+| `alpha_soft` | 152,076 B / 76,038 | 152,076 B / 76,038 | 相同 |
+| `opaque` | 1,864 B / 932 | 1,864 B / 932 | 相同 |
+
+也就是说,**决定 RLE 效果的是 alpha 的"块状程度",不是"哪一边占大面积"**。一张"透明区占 58%、四周实体"的图,和它的反相版本压出来一样大。
+
+**软渐变几乎压不动**——这是 RLE 的固有短板,不是实现问题。同一张 `alpha_soft` 用 PNG 的无损预测过滤器只要 13.01 KB,是 RLE 的 **11.4 倍**。所以脚本默认 `--rle-mode best`:当 RLE 反而比裸数据大时自动退回 RAW 存储(码流里用 `algo` 字段标出来)。
+
+### 实测(466×466 样图,三档质量)
+
+| 图 | q | JPEG | alpha 块 | AJPEG | vs PNG | bpp | PSNR | SSIM |
+|---|---|---|---|---|---|---|---|---|
+| alpha_soft | 85 | 55.53 KB | 150.35 KB | 205.89 KB | 55.8% | 7.767 | 34.84 dB | 0.978 |
+| alpha_sticker | 85 | 55.53 KB | 5.37 KB | 60.91 KB | **17.3%** | 2.298 | 34.84 dB | 0.978 |
+| opaque | 85 | 55.53 KB | 3.66 KB | 59.20 KB | **16.8%** | 2.233 | 34.84 dB | 0.978 |
+
+关键点:**alpha 的成本和质量无关**。滑质量只动 JPEG 那段,`alpha_soft` 无论 q70 还是 q95 都固定背着 150.35 KB —— 图里但凡有大面积软过渡透明,JPEG 那头省下来的字节会被 alpha 原样吃回去。全不透明图加 q85 只有 59.20 KB(PNG 的 16.8%),而同样内容一旦有了软 alpha,就变成 3.5 倍。
+
+### 换成真实素材更说明问题
+
+拿一张 512×512 的图标(`actions-address-book-new.png`,71.7 KB / RGBA)跑:
+
+| q | JPEG | alpha 块 | AJPEG | vs PNG |
+|---|---|---|---|---|
+| 75 | 20.12 KB | 41.62 KB | 61.75 KB | 86.1% |
+| 85 | 25.35 KB | 41.62 KB | 66.98 KB | 93.4% |
+| 95 | 41.08 KB | 41.62 KB | **82.70 KB** | **115.3%** |
+
+**q95 时整个文件比原 PNG 还大 15%。** 这张图的 RLE 把 alpha 压到 15.5%(39.60 KB),看着不差,可 PNG 那边用预测过滤器 + DEFLATE 只花 7.56 KB —— **5.2 倍差距**。抗锯齿边缘的 alpha 是逐像素微调的一圈渐变,RLE 在这上面几乎无能为力,而 PNG 的行内预测恰好就是为这种平滑曲面设计的。
+
+所以对**带抗锯齿边缘的 UI 素材**,这个方案只在 JPEG 侧真的省字节时才划算;一旦质量要求高(q95),叠加的 alpha 会把收益全吃掉。它真正适用的场景是**alpha 大面积恒定**的图(纯色背景抠图、遮罩、图标在纯色上),那时 RLE 能压到 1~2%,和 JPEG 叠起来就是纯赚。
+
+### 文件布局
+
+```
+[0 .. J)                baseline JPEG, YUV 4:2:0, 以 FF D9 结束
+[J .. J+16)             alpha 块头
+[J+16 .. J+16+4(h+1))   行偏移表, (h+1) × u32 LE, 相对 payload 起点
+[...)                   payload:RLE 节点流(len:1 + byte:1)或裸 alpha
+[末尾 12)               尾部索引:jpeg_size u32 | block_size u32 | 'AJP1'
+```
+
+alpha 块头 16 字节:`'AJP1'` magic | `u16 width` | `u16 height` | `u8 algo`(0=RLE / 1=RAW)| `u8 feature_1` | `u8 feature_2` | `u8 flags`(bit0 = 含透明像素)| `u32 payload_size`。行偏移表的形状照搬 `imdc_file_t`,尾部索引让解码端能**从文件末尾倒着定位**,不必猜 JPEG 在哪里结束。
+
+### 功能
+
+- `make_ajpeg.py`:PNG → AJPEG 转换,支持**单个文件或整个文件夹**(递归),`-q 70,85,95` 一次出多档质量
+- alpha 自动择优:RLE / RAW 谁小用谁(`--rle-mode best|rle|raw` 可强制)
+- 每张图**回环校验**:重新解析自己产出的 `.jpg`,解码 alpha 并与原图逐字节比对,不一致直接报错
+- PSNR / SSIM(11 点高斯窗 σ=1.5),给出 vs PNG 的比例、bpp、体积构成
+- `ajpeg-compare.html`:单文件交互查看器,支持**直接导入本地图片和整个文件夹**,**中英双语可切换**
+- `ajpeg-decode.js`:RLE 编解码器,**页面和自检脚本共用同一份**(避免两份副本只有一份是对的)
+- `verify_ajpeg.cjs`:加载上面那个编解码器,和 Python 的 adler32 对账,双向验证编码与解码
+
+### 查看器:导入本地图片
+
+面板里的「导入图片…」可以多选文件,「导入文件夹…」递归读整个目录(Chromium/Edge 支持 `webkitdirectory`)。导入的图会在浏览器里**实时转成 AJPEG**:canvas 编码 JPEG → 拆 alpha → RLE → 拼接 → 立刻反解一遍做回环校验,然后直接进对比视图。
+
+浏览器里算出的 PSNR / SSIM 和 `make_ajpeg.py` 用的是同一套公式,实测差值在 `1e-15` 量级(见下面的验证)。大图(超过 640×640)的 SSIM 会按整数步长抽稀采样,避免高斯卷积卡住 —— 那只是即时估算,精确值仍以 `metrics.json` 为准。
+
+### 中英切换
+
+侧栏底部有「语言 / Language」开关,切换后**整个界面**的语言都会变:面板标签、画布标题、副标题、左下角角标、回环校验卡、统计卡、导入提示。
+
+选择会存进 `localStorage`,下次打开还是同一种语言;也可以用 `?lang=en` / `?lang=zh` 强制指定。首次打开按浏览器语言猜,认不出就默认中文。
+
+实现上是一个 `I18N` 字典 + 两个入口:静态文案走 HTML 里的 `data-i18n="key"`,动态文案(带变量的副标题、角标、提示)走 `T("key", ...参数)`。脚本里有个自检,会在控制台报出中英两边 key 对不上的地方——加新文案时忘了补一种语言,打开控制台就能看到。
+
+**一个必须说清楚的限制**:浏览器的 `canvas.toBlob('image/jpeg')` 不暴露采样参数,实际用 4:2:0 还是 4:4:4 由编码器决定。所以导入的图**不能保证是 YUV 420** —— 查看器会解析码流里的 SOF,把实际采样格式如实显示在下拉框和统计卡里,而不是假设。要严格保证 4:2:0(和量化表可控),请用 `make_ajpeg.py`。
+
+### 使用
+
+```bash
+cd AJPEG
+python make_ajpeg.py --make-samples          # 生成 samples/ 下四张演示图
+python make_ajpeg.py                         # 整个 samples/ 文件夹
+python make_ajpeg.py -s 你的图.png -q 90     # 单张,只出一档
+python make_ajpeg.py -s 你的文件夹 -q 70,85,95
+node verify_ajpeg.cjs                        # 校验 JS 编解码器与 Python 逐位一致
+```
+
+不想用命令行也可以:**直接双击 `ajpeg-compare.html`,用「导入图片…」/「导入文件夹…」**。打开页面不需要 Python 先跑过 —— 没有 `out/data.js` 时会提示,但导入功能照常可用。
+
+产物在 `out/`(单文件模式是 `out_single/`):每档质量一个 `.jpg`、`metrics.json`、以及查看器用的 `data.js`。跑完直接双击 `ajpeg-compare.html`(图片已 base64 内联,`file://` 下也能读 canvas 像素)。
+
+查看器里的 alpha 是**在 JS 里现解 RLE**得到的,不是内联的成品图 —— 所以右下角那块「回环校验」绿标,同时验证了 Python 编码和 JS 解码两侧。按住 <kbd>空格</kbd> 看原图,「Alpha」视图里红点表示不一致(实测 0 个)。
+
+### 一个容易踩的坑
+
+### 两个踩过的坑
+
+**`lineOffsets` 是压缩后 payload 里的字节位置,不是解压后的像素位置。** 第一版 JS 解码器拿 `offsets[height]` 当输出缓冲区大小,结果 `alpha_soft` 只解出 152076 / 217156 字节 —— 正好是 70% 的压缩率,看着特别像"解对了"。adler32 对账把它揪出来了。
+
+**`data.js` 里的 payload 是 base64 字符串,必须先 `atob` 再喂给解码器。** 漏了这一步,`payload[p]` 取到的是字符码而不是字节,解出来一片 0 —— 页面上表现为 alpha 全透明、图看不见,校验显示 `50710001 ≠ cb3e2540`。当时自检脚本写的是 `b64(a.payload)` 所以是绿的,而页面里是裸的字符串,两份副本不一致。
+
+所以现在解码器只有一份(`ajpeg-decode.js`),自检直接 `require` 它 —— 不再可能"测试过了但页面是坏的"。自检还会额外断言 alpha 不能全零,专门堵这个漏洞。

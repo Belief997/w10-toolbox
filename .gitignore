@@ -15,3 +15,8 @@ progressiveJpeg/out/
 progressiveJpeg/out_frost*/
 camera_preview/samples/
 mi_ebadge.zip
+AJPEG/out/
+AJPEG/out_single/
+AJPEG/samples/
+AJPEG/_check.js
+__pycache__/
