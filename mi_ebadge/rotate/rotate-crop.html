@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rotate 旋转特效 · 同向环扣裁切工具</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #e9eaee; overflow: hidden; user-select: none;
+    background: #15161a; display: flex;
+  }
+
+  /* ---- 舞台 ---- */
+  #stage {
+    flex: 1; min-width: 0; height: 100%; overflow: auto;
+    padding: 22px 24px;
+    background: radial-gradient(120% 120% at 50% 30%, #23252c 0%, #181a1f 70%, #121317 100%);
+  }
+  .cards { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+  .card {
+    background: rgba(26,28,33,.72); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 14px; padding: 14px;
+  }
+  .card h3 { margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: .04em; opacity: .5; }
+  .card h3 b { opacity: 1; color: #ff4d6d; }
+  .card .note { margin: 10px 0 0; font-size: 11px; opacity: .4; line-height: 1.7; }
+  .card .note code { font-family: ui-monospace, Consolas, monospace; opacity: .9; }
+
+  /* 棋盘格底下才看得见「透明」;方形 —— 输出本来就是一张方 PNG,圆角会骗人 */
+  .checker {
+    border-radius: 10px; overflow: hidden; background:
+      linear-gradient(45deg, #2a2c33 25%, transparent 25%, transparent 75%, #2a2c33 75%),
+      linear-gradient(45deg, #2a2c33 25%, #1e2027 25%, #1e2027 75%, #2a2c33 75%);
+    background-size: 16px 16px; background-position: 0 0, 8px 8px;
+  }
+  canvas { display: block; }
+
+  /* 原图上的取景提示:虚线圈 = 2 环外接正方形(被抠走的那块) */
+  .ringmark {
+    position: absolute; pointer-events: none; border-radius: 50%;
+    border: 1px dashed rgba(255,77,109,.75);
+    box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+  }
+
+  /* 旋转预览:方形舞台,正方形贴图此刻内切其中 */
+  #ringStage { position: relative; }
+  #ringStage .frame {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 1px dashed rgba(255,77,109,.55); pointer-events: none;
+  }
+  #ringStage .fx {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(circle, transparent 0 52%, rgba(0,0,0,.45) 100%);
+  }
+
+  /* ---- 右侧面板 ---- */
+  #panel {
+    width: 296px; flex: 0 0 296px; height: 100%; overflow-y: auto;
+    background: rgba(26,28,33,.92); backdrop-filter: blur(14px);
+    border-left: 1px solid rgba(255,255,255,.07); padding: 20px 18px;
+  }
+  #panel h1 { font-size: 15px; margin: 0 0 4px; font-weight: 700; }
+  #panel .sub { font-size: 12px; opacity: .45; margin: 0 0 18px; line-height: 1.6; }
+
+  .group { margin: 0 0 18px; }
+  .group > .gt {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    opacity: .4; margin: 0 0 9px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
+  .row label { font-size: 13px; opacity: .75; white-space: nowrap; flex: 0 0 auto; }
+  .row .val {
+    margin-left: auto; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px; opacity: .6; min-width: 46px; text-align: right;
+  }
+  input[type=range] { flex: 1; min-width: 0; accent-color: #ff2d55; }
+  input[type=color] {
+    width: 42px; height: 28px; padding: 0; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.16); border-radius: 7px; background: transparent;
+  }
+  input[type=file] { display: none; }
+  select {
+    flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid rgba(255,255,255,.14);
+    border-radius: 8px; background: #101115; color: inherit;
+  }
+  button.ghost {
+    width: 100%; padding: 10px; margin-top: 8px; font-size: 13px; font-weight: 600;
+    border: 1px solid rgba(255,255,255,.14); border-radius: 10px; cursor: pointer;
+    background: #101115; color: inherit;
+  }
+  button.ghost:hover { background: #1b1d23; }
+  button.ghost:disabled { opacity: .35; cursor: not-allowed; }
+  button.ghost.main { background: linear-gradient(180deg, #ff4d6d, #ff2d55); border-color: transparent; color: #fff; }
+  button.ghost.main:hover { filter: brightness(1.06); }
+  .half { display: flex; gap: 8px; }
+  .half button.ghost { margin-top: 8px; }
+
+  .imgname {
+    margin-top: 8px; font-size: 10px; opacity: .45; text-align: center;
+    font-family: ui-monospace, Consolas, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .hint { margin-top: 16px; font-size: 11px; opacity: .42; line-height: 1.85; }
+  .hint code { font-family: ui-monospace, Consolas, monospace; opacity: .9; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="empty" class="card" style="max-width:640px">
+      <h3>还没有图片</h3>
+      <p class="note" style="margin-top:0;font-size:12px;opacity:.55">
+        把 PNG / JPG 拖进这个窗口,或点右侧「选择图片」。<br>
+        工具会把同一转向的「内圆 + 2 环」从图里抠出来,合成一张边长 = 2 环外接正方形的贴图。
+      </p>
+    </div>
+
+    <div id="cards" class="cards" hidden>
+      <div class="card">
+        <h3>原图 · 按短边居中裁方 <span id="srcChip"></span></h3>
+        <div id="srcWrap" style="position:relative;line-height:0">
+          <canvas id="srcCv"></canvas>
+          <div class="ringmark" id="srcMark"></div>
+        </div>
+        <p class="note" id="srcNote"></p>
+      </div>
+
+      <div class="card">
+        <h3>输出 · <b>内圆 + 2 环</b> <span id="cropChip"></span></h3>
+        <div class="checker"><canvas id="cropCv"></canvas></div>
+        <p class="note" id="cropNote"></p>
+      </div>
+
+      <div class="card">
+        <h3>旋转预览 · 与另一组反向</h3>
+        <div id="ringStage"><div class="fx"></div><canvas id="ringCv"></canvas><div class="frame"></div></div>
+        <p class="note" id="ringNote"></p>
+      </div>
+
+      <div class="card">
+        <h3>另一组 · 外环 + 3 环 <span id="evenChip"></span></h3>
+        <div class="checker"><canvas id="evenCv"></canvas></div>
+        <p class="note">同一条管线、另一组环带 —— 用来核对切分是否干净:两组的亮区必须互补,拼回去等于原图。</p>
+      </div>
+    </div>
+  </div>
+
+  <aside id="panel">
+    <h1>rotate 贴图裁切</h1>
+    <p class="sub">bgFx <code>rotate</code> 的四环各自旋转,相邻反向 —— 这里把<b>转向相同</b>的环扣并成一张贴图</p>
+
+    <div class="group">
+      <div class="gt">源图</div>
+      <div class="half">
+        <button class="ghost main" id="pickImg">选择图片</button>
+        <button class="ghost" id="saveBtn" disabled>导出 PNG</button>
+      </div>
+      <input type="file" id="imgFile" accept="image/png,image/jpeg,image/webp,image/*">
+      <div class="imgname" id="imgName"></div>
+    </div>
+
+    <div class="group">
+      <div class="gt">输出尺寸</div>
+      <div class="row">
+        <label>倍数</label>
+        <select id="scale">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1× · 源分辨率</option>
+          <option value="2">2×</option>
+          <option value="3">3×</option>
+        </select>
+        <span class="val" id="scaleVal"></span>
+      </div>
+      <div class="row">
+        <label>底色</label>
+        <input type="color" id="bgColor" value="#000000">
+        <select id="bgMode" style="flex:1 1 96px">
+          <option value="alpha" selected>保持透明</option>
+          <option value="solid">填充底色</option>
+        </select>
+      </div>
+      <button class="ghost" id="copyBtn" disabled>复制到剪贴板</button>
+    </div>
+
+    <div class="group">
+      <div class="gt">几何(466 基准)</div>
+      <div class="imgname" id="geo" style="text-align:left;line-height:1.9;opacity:.55"></div>
+    </div>
+
+    <div class="hint">
+      · 内圆 <code>0.125</code>、2 环 <code>0.25…0.375</code>,两者角度都是 <code>90°→0°</code>;外环 <code>-90°→0°</code>、3 环 <code>-90°→0°</code>,所以能同转的只有「2 环 + 内圆」。<br>
+      · 输出边长 = 2 环外接正方形 = <code>0.75 × 短边</code>。圆绕固定圆心转,任何角度都内切这个正方形,所以不留边距 —— 留了比例就和 466 基准对不上。<br>
+      · 取景与预览一致:<b>先按短边居中裁成正方形</b>,再取其中以圆心为中心的那 0.75。<br>
+      · 导出是<b>透明 PNG</b>:3 环位置全透明,设备按黑底铺时不会漏出另一组的画面。<br>
+      · 想把这组贴图叠回原图检查,可以拿「外环 + 3 环」那张当另一层。
+    </div>
+  </aside>
+
+<script src="rotate-crop.js"></script>
+<script>
+"use strict";
+(() => {
+  const RC = window.RotateCrop;
+  const $ = (id) => document.getElementById(id);
+  const ODD = RC.SPRITE.odd;
+
+  const ui = {
+    img: null,        // 当前图片(Image 或 ImageBitmap)
+    name: '',
+    out: null,        // 最近一次 renderSprite 的结果
+    scale: 1,
+    bgMode: 'alpha',
+    bgColor: '#000000',
+    srcCss: 360,
+    cropCss: 300,
+    evenCss: 200
+  };
+
+  // ---------- 几何读数 ----------
+  // 所有数字都从引擎的 RC.RING / ODD.bands 推出来,面板里不留第二份常量 ——
+  // 改半径只改 rotate-crop.js 一处。
+  const K = RC.RING;
+  const px = (r) => (r * RC.REF).toFixed(1) + 'px';   // r 以 466 基准的边长归一化
+
+  // 保留环带归一化到「贴图边长」,换算回 466 基准的半径
+  const kept = ODD.bands.map((b) => [b[0] * ODD.side, b[1] * ODD.side]);
+
+  function geoText() {
+    return [
+      `内圆 0…${px(kept[0][1])}`,
+      `2 环 ${px(kept[1][0])}…${px(kept[1][1])}`,
+      `3 环 ${px(K.inner)}…${px(K.ring3)}(本组不取)`,
+      `外环 ${px(K.ring2)}…${px(K.outer)}(本组不取)`,
+      `贴图边长 ${ODD.side} × ${RC.REF} = ${px(ODD.side)}`
+    ].join('<br>');
+  }
+  $('geo').innerHTML = geoText();
+
+  // ---------- 主流程 ----------
+  function render() {
+    if (!ui.img) return;
+    const iw = ui.img.naturalWidth || ui.img.width;
+    const ih = ui.img.naturalHeight || ui.img.height;
+
+    // --- 输出图 ---
+    const baseSide = RC.outputSide(iw, ih, ODD.side);
+    const size = Math.max(1, Math.round(baseSide * ui.scale));
+    const res = RC.renderSprite((w, h) => {
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      return c;
+    }, ui.img, ODD, {
+      size: size,
+      background: ui.bgMode === 'solid' ? ui.bgColor : null
+    });
+    ui.out = res;
+
+    // --- 输出预览 ---
+    const cropCv = $('cropCv');
+    const css = ui.cropCss;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cropCv.width = Math.round(css * dpr); cropCv.height = Math.round(css * dpr);
+    cropCv.style.width = css + 'px'; cropCv.style.height = css + 'px';
+    const cctx = cropCv.getContext('2d');
+    cctx.clearRect(0, 0, cropCv.width, cropCv.height);
+    if ('imageSmoothingQuality' in cctx) cctx.imageSmoothingQuality = 'high';
+    cctx.drawImage(res.canvas, 0, 0, cropCv.width, cropCv.height);
+
+    // --- 屏幕大图:同样的「按短边居中裁方」,但不遮罩 ---
+    const srcCv = $('srcCv');
+    const s = ui.srcCss;
+    srcCv.width = s; srcCv.height = s;
+    srcCv.style.width = s + 'px'; srcCv.style.height = s + 'px';
+    const sctx = srcCv.getContext('2d');
+    sctx.clearRect(0, 0, s, s);
+    if ('imageSmoothingQuality' in sctx) sctx.imageSmoothingQuality = 'high';
+    const r0 = RC.sourceRect(iw, ih, 1);
+    sctx.drawImage(ui.img, r0.x, r0.y, r0.w, r0.h, 0, 0, s, s);
+
+    // --- 另一组(外环 + 3 环):同一条管线,当场验证切分是互补的 ---
+    const evenCss = ui.evenCss;
+    const evenCv = $('evenCv');
+    evenCv.width = evenCss; evenCv.height = evenCss;
+    evenCv.style.width = evenCss + 'px'; evenCv.style.height = evenCss + 'px';
+    // 预览用的分辨率固定,不跟导出尺寸走 —— 免得 3× 导出时多算一张大图
+    const evenRes = RC.renderSprite((w, h) => {
+      const c = document.createElement('canvas'); c.width = w; c.height = h; return c;
+    }, ui.img, RC.SPRITE.even, { size: evenCss * dpr });
+    const ectx = evenCv.getContext('2d');
+    ectx.clearRect(0, 0, evenCss, evenCss);
+    ectx.drawImage(evenRes.canvas, 0, 0, evenCss, evenCss);
+
+    // --- 读数 ---
+    $('scaleVal').textContent = `${baseSide}→${size}`;
+    $('srcChip').textContent = `· ${iw}×${ih}`;
+    $('srcNote').innerHTML =
+      `取方 ${Math.round(r0.w)}×${Math.round(r0.h)} px` +
+      (r0.w < Math.min(iw, ih) ? `(短边 ${Math.min(iw, ih)},两侧各裁 ${Math.round((iw - Math.min(iw, ih)) / 2)} px)` : '') +
+      `;<b>虚线圈</b> = 2 环外接正方形(${ODD.side} × 短边),也就是被抠走的那块。`;
+
+    // 虚线圈跟着预览尺寸走:直径 = 0.75 × 取方边长
+    const mark = $('srcMark');
+    const d = Math.round(s * ODD.side);
+    mark.style.width = mark.style.height = d + 'px';
+    mark.style.left = mark.style.top = Math.round((s - d) / 2) + 'px';
+    $('cropChip').textContent = `· ${size}×${size}`;
+    $('cropNote').innerHTML =
+      `半径 ${px(kept[0][1])} 内圆 + ${px(kept[1][0])}…${px(kept[1][1])} 环带` +
+      `(466 基准);圆外与 3 环位置全透明。`;
+    $('evenChip').textContent = `· ${evenCss}×${evenCss}`;
+
+    drawRing(0);
+  }
+
+  // ---------- 旋转预览 ----------
+  // 贴图当前角度 = RC.SPRITE.odd.from → to,2 秒一轮。画在方形舞台中央,
+  // 舞台内切圆正好是 2 环外缘 —— 转起来就能看出「任何角度都不越出这个正方形」。
+  let raf = null, t0 = 0;
+  function drawRing(ms) {
+    const cv = $('ringCv');
+    const stage = $('ringStage');
+    const css = ui.cropCss;
+    if (!raf || ms === 0) {
+      cv.width = css; cv.height = css;
+      cv.style.width = css + 'px'; cv.style.height = css + 'px';
+      stage.style.width = css + 'px'; stage.style.height = css + 'px';
+    }
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, css, css);
+    if (!ui.out) return;
+    const sec = ms / 1000;
+    const ang = RC.angleAt(ODD, sec);
+    ctx.save();
+    ctx.translate(css / 2, css / 2);
+    ctx.rotate(ang);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(ui.out.canvas, -css / 2, -css / 2, css, css);
+    ctx.restore();
+
+    const deg = Math.round(ang * 180 / Math.PI);
+    $('ringNote').innerHTML =
+      `${sec % 2 < 1 ? '旋转中' : '保持正位'} · 当前 <b>${deg}°</b> · 2 秒一轮(第 2 秒在 0°)`;
+  }
+  function loop(ts) {
+    if (!t0) t0 = ts;
+    drawRing(ts - t0);
+    raf = requestAnimationFrame(loop);
+  }
+  function startLoop() { if (!raf) { t0 = 0; raf = requestAnimationFrame(loop); } }
+
+  // ---------- 载图 ----------
+  function useFile(f) {
+    if (!f || !/^image\//.test(f.type)) return;
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => {
+      ui.img = img; ui.name = f.name;
+      URL.revokeObjectURL(url);
+      afterLoad();
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); alert('图片加载失败:' + f.name); };
+    img.src = url;
+  }
+
+  function afterLoad() {
+    $('empty').hidden = true;
+    $('cards').hidden = false;
+    $('imgName').textContent = ui.name;
+    $('saveBtn').disabled = false;
+    $('copyBtn').disabled = false;
+    const iw = ui.img.naturalWidth || ui.img.width;
+    const ih = ui.img.naturalHeight || ui.img.height;
+    // 源图预览显示「裁方后的整块」,和输出图同尺度便于看出被抠掉的是哪一圈
+    ui.srcCss = Math.min(300, Math.max(160, iw));
+    $('scaleVal').textContent = '';
+    render();
+    startLoop();
+  }
+
+  // ---------- 导出 ----------
+  function stamp() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  }
+  function saveName() {
+    const base = (ui.name || 'image').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_');
+    return `${base}-rotate-inner-ring2-${ui.out ? ui.out.size : 0}px-${stamp()}.png`;
+  }
+  function download() {
+    if (!ui.out) return;
+    ui.out.canvas.toBlob((blob) => {
+      if (!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = saveName();
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, 'image/png');
+  }
+  function copyToClipboard() {
+    if (!ui.out) return;
+    if (!navigator.clipboard || !window.ClipboardItem) { alert('当前浏览器不支持把图片写进剪贴板'); return; }
+    ui.out.canvas.toBlob((blob) => {
+      if (!blob) return;
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        .then(() => flash($('copyBtn'), '已复制'))
+        .catch(() => alert('复制失败(可能需要页面处于焦点)'));
+    }, 'image/png');
+  }
+  function flash(btn, text) {
+    const old = btn.textContent;
+    btn.textContent = text;
+    setTimeout(() => { btn.textContent = old; }, 1200);
+  }
+
+  // ---------- 绑定 ----------
+  $('pickImg').addEventListener('click', () => $('imgFile').click());
+  $('imgFile').addEventListener('change', (e) => useFile(e.target.files && e.target.files[0]));
+  $('saveBtn').addEventListener('click', download);
+  $('copyBtn').addEventListener('click', copyToClipboard);
+
+  $('scale').addEventListener('change', (e) => { ui.scale = +e.target.value; render(); });
+  $('bgMode').addEventListener('change', (e) => { ui.bgMode = e.target.value; render(); });
+  $('bgColor').addEventListener('input', (e) => { ui.bgColor = e.target.value; render(); });
+
+  // 拖图进来即换图
+  const stage = $('stage');
+  stage.addEventListener('dragover', (e) => { e.preventDefault(); });
+  stage.addEventListener('drop', (e) => {
+    e.preventDefault();
+    useFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+  });
+
+  // Ctrl/Cmd+S 直接导出
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS' && ui.out) { e.preventDefault(); download(); }
+  });
+})();
+</script>
+</body>
+</html>
