@@ -1,0 +1,303 @@
+{
+  "source": {
+    "file": "user-wallpaper.png",
+    "width": 466,
+    "height": 466,
+    "mode": "RGBA",
+    "bytes": 422964,
+    "alpha": "alpha 全不透明,丢弃无损"
+  },
+  "encode": {
+    "quality": 85,
+    "subsampling": "4:2:0",
+    "progressive_bytes": 55159,
+    "baseline_bytes": 56862,
+    "sampling": "1:2x2 2:1x1 3:1x1",
+    "scan_count": 10
+  },
+  "scans": [
+    {
+      "index": 1,
+      "bytes": 4260,
+      "ratio": 0.07723127685418517,
+      "desc": "Y+Cb+Cr / DC / 首次传输,低 1 bit 未发",
+      "psnr": 19.766215698259632,
+      "ssim": 0.5673333864300829,
+      "Ss": 0,
+      "Se": 0,
+      "Ah": 0,
+      "Al": 1,
+      "components": [
+        1,
+        2,
+        3
+      ],
+      "end_offset": 4258
+    },
+    {
+      "index": 2,
+      "bytes": 11108,
+      "ratio": 0.20138146086767345,
+      "desc": "Y / AC 1-5 / 首次传输,低 2 bit 未发",
+      "psnr": 22.99271030522751,
+      "ssim": 0.7569445581070929,
+      "Ss": 1,
+      "Se": 5,
+      "Ah": 0,
+      "Al": 2,
+      "components": [
+        1
+      ],
+      "end_offset": 11106
+    },
+    {
+      "index": 3,
+      "bytes": 12491,
+      "ratio": 0.22645443173371527,
+      "desc": "Cr / AC 1-63 / 首次传输,低 1 bit 未发",
+      "psnr": 23.30176152381334,
+      "ssim": 0.7607789443062455,
+      "Ss": 1,
+      "Se": 63,
+      "Ah": 0,
+      "Al": 1,
+      "components": [
+        3
+      ],
+      "end_offset": 12489
+    },
+    {
+      "index": 4,
+      "bytes": 13791,
+      "ratio": 0.25002266175964033,
+      "desc": "Cb / AC 1-63 / 首次传输,低 1 bit 未发",
+      "psnr": 23.63153143699702,
+      "ssim": 0.7655661500165643,
+      "Ss": 1,
+      "Se": 63,
+      "Ah": 0,
+      "Al": 1,
+      "components": [
+        2
+      ],
+      "end_offset": 13789
+    },
+    {
+      "index": 5,
+      "bytes": 22813,
+      "ratio": 0.41358617813956017,
+      "desc": "Y / AC 6-63 / 首次传输,低 2 bit 未发",
+      "psnr": 28.02792143496571,
+      "ssim": 0.8916321388613547,
+      "Ss": 6,
+      "Se": 63,
+      "Ah": 0,
+      "Al": 2,
+      "components": [
+        1
+      ],
+      "end_offset": 22811
+    },
+    {
+      "index": 6,
+      "bytes": 33813,
+      "ratio": 0.6130096629743106,
+      "desc": "Y / AC 1-63 / 精化 bit 1",
+      "psnr": 30.555687647023667,
+      "ssim": 0.933769251627493,
+      "Ss": 1,
+      "Se": 63,
+      "Ah": 2,
+      "Al": 1,
+      "components": [
+        1
+      ],
+      "end_offset": 33811
+    },
+    {
+      "index": 7,
+      "bytes": 34504,
+      "ratio": 0.6255370837034754,
+      "desc": "Y+Cb+Cr / DC / 精化 bit 0",
+      "psnr": 30.62117307103381,
+      "ssim": 0.9345312606279985,
+      "Ss": 0,
+      "Se": 0,
+      "Ah": 1,
+      "Al": 0,
+      "components": [
+        1,
+        2,
+        3
+      ],
+      "end_offset": 34502
+    },
+    {
+      "index": 8,
+      "bytes": 36005,
+      "ratio": 0.6527493246795627,
+      "desc": "Cr / AC 1-63 / 精化 bit 0",
+      "psnr": 30.909483418460567,
+      "ssim": 0.9363593415852937,
+      "Ss": 1,
+      "Se": 63,
+      "Ah": 1,
+      "Al": 0,
+      "components": [
+        3
+      ],
+      "end_offset": 36003
+    },
+    {
+      "index": 9,
+      "bytes": 37397,
+      "ratio": 0.6779854602150148,
+      "desc": "Cb / AC 1-63 / 精化 bit 0",
+      "psnr": 31.24993349655169,
+      "ssim": 0.9387347091421399,
+      "Ss": 1,
+      "Se": 63,
+      "Ah": 1,
+      "Al": 0,
+      "components": [
+        2
+      ],
+      "end_offset": 37395
+    },
+    {
+      "index": 10,
+      "bytes": 55159,
+      "ratio": 1.0,
+      "desc": "Y / AC 1-63 / 精化 bit 0",
+      "psnr": 34.83908442174468,
+      "ssim": 0.9635868606068355,
+      "Ss": 1,
+      "Se": 63,
+      "Ah": 1,
+      "Al": 0,
+      "components": [
+        1
+      ],
+      "end_offset": 55157
+    }
+  ],
+  "first_scan_no_smoothing": {
+    "psnr": 19.126703958004846,
+    "ssim": 0.519309693386375,
+    "luma_std_in_8x8": 0.0
+  },
+  "blurs": [
+    {
+      "sigma": 1.0,
+      "file": "blur_s1.png",
+      "psnr_vs_orig": 26.2548266727417,
+      "ssim_vs_orig": 0.8836695295753162,
+      "psnr_vs_scan1": 22.688430020717053,
+      "ssim_vs_scan1": 0.6837219869500801
+    },
+    {
+      "sigma": 2.0,
+      "file": "blur_s2.png",
+      "psnr_vs_orig": 22.763776941891507,
+      "ssim_vs_orig": 0.7462175936940972,
+      "psnr_vs_scan1": 26.17933785009397,
+      "ssim_vs_scan1": 0.8143741534969801
+    },
+    {
+      "sigma": 3.0,
+      "file": "blur_s3.png",
+      "psnr_vs_orig": 21.11794880405671,
+      "ssim_vs_orig": 0.6613110986753351,
+      "psnr_vs_scan1": 28.973587575032845,
+      "ssim_vs_scan1": 0.9024780149734122
+    },
+    {
+      "sigma": 3.4,
+      "file": "blur_s3p4.png",
+      "psnr_vs_orig": 20.643232322531983,
+      "ssim_vs_orig": 0.6369364194753443,
+      "psnr_vs_scan1": 29.348651409054433,
+      "ssim_vs_scan1": 0.9209119818386821
+    },
+    {
+      "sigma": 3.5,
+      "file": "blur_s3p5.png",
+      "psnr_vs_orig": 20.535820450339205,
+      "ssim_vs_orig": 0.631501047073947,
+      "psnr_vs_scan1": 29.35536635301199,
+      "ssim_vs_scan1": 0.9239988357948552
+    },
+    {
+      "sigma": 4.0,
+      "file": "blur_s4.png",
+      "psnr_vs_orig": 20.051333341116795,
+      "ssim_vs_orig": 0.6076559219611222,
+      "psnr_vs_scan1": 28.945219398607094,
+      "ssim_vs_scan1": 0.9311751000759648
+    },
+    {
+      "sigma": 4.25,
+      "file": "blur_s4p25.png",
+      "psnr_vs_orig": 19.837459227022112,
+      "ssim_vs_orig": 0.5975475351235794,
+      "psnr_vs_scan1": 28.54315462976537,
+      "ssim_vs_scan1": 0.9302152425012054
+    },
+    {
+      "sigma": 4.3,
+      "file": "blur_s4p3.png",
+      "psnr_vs_orig": 19.79693510811069,
+      "ssim_vs_orig": 0.5956659309985516,
+      "psnr_vs_scan1": 28.45361494135377,
+      "ssim_vs_scan1": 0.9297068480436815
+    },
+    {
+      "sigma": 5.0,
+      "file": "blur_s5.png",
+      "psnr_vs_orig": 19.284443965318555,
+      "ssim_vs_orig": 0.5727981297831626,
+      "psnr_vs_scan1": 27.06366878848501,
+      "ssim_vs_scan1": 0.9143074406249795
+    },
+    {
+      "sigma": 6.0,
+      "file": "blur_s6.png",
+      "psnr_vs_orig": 18.699029311985903,
+      "ssim_vs_orig": 0.5494511437005961,
+      "psnr_vs_scan1": 25.197625394803197,
+      "ssim_vs_scan1": 0.877120836713526
+    }
+  ],
+  "equivalent_sigma": {
+    "best_match_psnr": {
+      "sigma": 3.5,
+      "psnr_vs_orig": 20.535820450339205,
+      "ssim_vs_orig": 0.631501047073947,
+      "psnr_vs_scan1": 29.35536635301199,
+      "ssim_vs_scan1": 0.9239988357948552
+    },
+    "best_match_ssim": {
+      "sigma": 4.0,
+      "psnr_vs_orig": 20.051333341116795,
+      "ssim_vs_orig": 0.6076559219611222,
+      "psnr_vs_scan1": 28.945219398607094,
+      "ssim_vs_scan1": 0.9311751000759648
+    },
+    "iso_distortion": {
+      "sigma": 4.3,
+      "psnr_vs_orig": 19.79693510811069,
+      "ssim_vs_orig": 0.5956659309985516,
+      "psnr_vs_scan1": 28.45361494135377,
+      "ssim_vs_scan1": 0.9297068480436815
+    },
+    "theory_box_filter": {
+      "luma_box8": 2.309,
+      "chroma_box16": 4.619
+    }
+  },
+  "notes": [
+    "SSIM = Wang et al. 标准式,11x11 高斯窗 sigma=1.5,逐通道平均,裁边 5px",
+    "高斯模糊在 sRGB 空间做,边缘 nearest 夹取,截断半径 4 sigma",
+    "scanNN.png 由 libjpeg 解码(带 DC block smoothing),即浏览器所见"
+  ]
+}

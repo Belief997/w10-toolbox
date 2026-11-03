@@ -1,0 +1,168 @@
+{
+  "source": {
+    "file": "user-wallpaper.png",
+    "width": 466,
+    "height": 466
+  },
+  "encode": {
+    "q00_y": 8,
+    "q00_c": 16,
+    "ac_enc": 255,
+    "ac_dec": 1,
+    "subsampling": "4:2:0",
+    "dual_bytes": 6171,
+    "q75_bytes": 43474,
+    "ratio_vs_q75": 0.1419,
+    "bpp": 0.2273,
+    "dqt_only_diff_bytes": 126
+  },
+  "small": {
+    "width": 59,
+    "height": 59,
+    "rgb565_bytes": 6962
+  },
+  "presets": [
+    {
+      "w": 1,
+      "n": 0,
+      "tag": "无后处理 · 纯 1/8+双线性",
+      "file": "frost_w1n0.png",
+      "sigma_formula": 4.0,
+      "sigma_measured": 5.499999999999995,
+      "sigma_error": 1.5,
+      "psnr_vs_gauss": 24.69706028560347,
+      "ssim_vs_gauss": 0.8453308364379932,
+      "psnr_at_formula_sigma": 24.152991641578794,
+      "box_passes": 0
+    },
+    {
+      "w": 3,
+      "n": 1,
+      "tag": "常规毛玻璃",
+      "file": "frost_w3n1.png",
+      "sigma_formula": 7.659,
+      "sigma_measured": 8.8594168620507,
+      "sigma_error": 1.2,
+      "psnr_vs_gauss": 29.900988516916037,
+      "ssim_vs_gauss": 0.9660729878505965,
+      "psnr_at_formula_sigma": 29.446549783475696,
+      "box_passes": 2
+    },
+    {
+      "w": 3,
+      "n": 3,
+      "tag": "iOS 风格",
+      "file": "frost_w3n3.png",
+      "sigma_formula": 12.0,
+      "sigma_measured": 12.699999999999998,
+      "sigma_error": 0.7,
+      "psnr_vs_gauss": 33.217755716921204,
+      "ssim_vs_gauss": 0.9895057691580176,
+      "psnr_at_formula_sigma": 33.02870202841754,
+      "box_passes": 6
+    },
+    {
+      "w": 5,
+      "n": 3,
+      "tag": "CSS blur(20px)",
+      "file": "frost_w5n3.png",
+      "sigma_formula": 20.0,
+      "sigma_measured": 20.80000000000001,
+      "sigma_error": 0.8,
+      "psnr_vs_gauss": 37.27382078169448,
+      "ssim_vs_gauss": 0.9950396623496921,
+      "psnr_at_formula_sigma": 37.03192646689255,
+      "box_passes": 6
+    },
+    {
+      "w": 7,
+      "n": 3,
+      "tag": "极重虚化",
+      "file": "frost_w7n3.png",
+      "sigma_formula": 28.0,
+      "sigma_measured": 29.100000000000016,
+      "sigma_error": 1.1,
+      "psnr_vs_gauss": 39.996040074116024,
+      "ssim_vs_gauss": 0.9959029862326165,
+      "psnr_at_formula_sigma": 39.58924567432491,
+      "box_passes": 6
+    }
+  ],
+  "failure_modes": {
+    "single_table_1to1_max_delta": 190,
+    "noshape_1to8_max_delta": 52,
+    "noshape_1to8_per_channel": {
+      "Y": 11,
+      "Cb": 30,
+      "Cr": 30
+    },
+    "dc_gain": [
+      {
+        "q_dec00": 4,
+        "gain": 0.5,
+        "mean": 126.55,
+        "std": 32.76,
+        "saturated_pct": 0.0
+      },
+      {
+        "q_dec00": 8,
+        "gain": 1.0,
+        "mean": 124.55,
+        "std": 65.4,
+        "saturated_pct": 1.5
+      },
+      {
+        "q_dec00": 16,
+        "gain": 2.0,
+        "mean": 116.99,
+        "std": 93.91,
+        "saturated_pct": 30.07
+      },
+      {
+        "q_dec00": 32,
+        "gain": 4.0,
+        "mean": 108.58,
+        "std": 102.0,
+        "saturated_pct": 48.48
+      }
+    ],
+    "rgb565_vs_rgb888_psnr": 44.48
+  },
+  "shift_invariance": {
+    "w1n0": {
+      "frost_max": 100.0,
+      "frost_mean": 5.057359905937684,
+      "gauss_max": 29.0,
+      "gauss_mean": 0.030316284538506762
+    },
+    "w3n1": {
+      "frost_max": 56.0,
+      "frost_mean": 1.6114798353909465,
+      "gauss_max": 24.0,
+      "gauss_mean": 0.0754198706643151
+    },
+    "w3n3": {
+      "frost_max": 29.0,
+      "frost_mean": 0.9026236331569665,
+      "gauss_max": 24.0,
+      "gauss_mean": 0.13190758377425044
+    },
+    "w5n3": {
+      "frost_max": 22.0,
+      "frost_mean": 0.736021164021164,
+      "gauss_max": 20.0,
+      "gauss_mean": 0.2299520282186949
+    },
+    "w7n3": {
+      "frost_max": 19.0,
+      "frost_mean": 0.7580820693709582,
+      "gauss_max": 18.0,
+      "gauss_mean": 0.31666407995296886
+    }
+  },
+  "notes": [
+    "sigma_formula 低估:只叠了小图 box,没叠双线性上采样的 tent 贡献",
+    "4:2:0 下色度走 jpeg_idct_2x2,1/8 解码仍吃低频 AC,故 Q_dec AC=1 是必需项",
+    "Q(0,0) 两表不一致 = 围绕 128 的对比度缩放 + 双向削波,不是亮度偏移"
+  ]
+}

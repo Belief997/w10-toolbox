@@ -1,0 +1,273 @@
+{
+  "width": 640,
+  "height": 480,
+  "files": {
+    "rgb565_640x480.raw": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "rgb565"
+    },
+    "rgb565be_640x480.raw": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "rgb565",
+      "bigEndian": true
+    },
+    "bgr565_640x480.raw": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "bgr565"
+    },
+    "rgb888_640x480.raw": {
+      "bytes": 921600,
+      "width": 640,
+      "height": 480,
+      "fmt": "rgb888"
+    },
+    "bgr888_640x480.raw": {
+      "bytes": 921600,
+      "width": 640,
+      "height": 480,
+      "fmt": "bgr888"
+    },
+    "rgba8888_640x480.raw": {
+      "bytes": 1228800,
+      "width": 640,
+      "height": 480,
+      "fmt": "rgba8888"
+    },
+    "yuyv_640x480.yuv": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "yuyv"
+    },
+    "yvyu_640x480.yuv": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "yvyu"
+    },
+    "uyvy_640x480.yuv": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "uyvy"
+    },
+    "vyuy_640x480.yuv": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "vyuy"
+    },
+    "yuyv_full_640x480.yuv": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "yuyv",
+      "range": "full"
+    },
+    "yuyv_bt709_640x480.yuv": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "yuyv",
+      "matrix": "bt709"
+    },
+    "nv16_640x480.yuv": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "nv16"
+    },
+    "nv61_640x480.yuv": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "nv61"
+    },
+    "i422_640x480.yuv": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "i422"
+    },
+    "yv16_640x480.yuv": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "yv16"
+    },
+    "nv12_640x480.yuv": {
+      "bytes": 460800,
+      "width": 640,
+      "height": 480,
+      "fmt": "nv12"
+    },
+    "nv21_640x480.yuv": {
+      "bytes": 460800,
+      "width": 640,
+      "height": 480,
+      "fmt": "nv21"
+    },
+    "i420_640x480.yuv": {
+      "bytes": 460800,
+      "width": 640,
+      "height": 480,
+      "fmt": "i420"
+    },
+    "yv12_640x480.yuv": {
+      "bytes": 460800,
+      "width": 640,
+      "height": 480,
+      "fmt": "yv12"
+    },
+    "gray8_640x480.raw": {
+      "bytes": 307200,
+      "width": 640,
+      "height": 480,
+      "fmt": "gray8"
+    },
+    "raw8_rggb_640x480.raw": {
+      "bytes": 307200,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw8",
+      "cfa": "rggb"
+    },
+    "raw8_bggr_640x480.raw": {
+      "bytes": 307200,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw8",
+      "cfa": "bggr"
+    },
+    "raw8_grbg_640x480.raw": {
+      "bytes": 307200,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw8",
+      "cfa": "grbg"
+    },
+    "raw10p_rggb_640x480.raw": {
+      "bytes": 384000,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw10p",
+      "cfa": "rggb"
+    },
+    "raw10u_rggb_640x480.raw": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw10u",
+      "cfa": "rggb"
+    },
+    "raw10u_msb_rggb_640x480.raw": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw10u",
+      "cfa": "rggb",
+      "msbAligned": true
+    },
+    "raw12p_rggb_640x480.raw": {
+      "bytes": 460800,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw12p",
+      "cfa": "rggb"
+    },
+    "raw12u_rggb_640x480.raw": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw12u",
+      "cfa": "rggb"
+    },
+    "raw16_rggb_640x480.raw": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw16",
+      "cfa": "rggb"
+    },
+    "jpeg_640x480.jpg": {
+      "bytes": 25106,
+      "width": 640,
+      "height": 480,
+      "fmt": "jpeg"
+    },
+    "ov2640_raw10_bggr_640x480.bin": {
+      "bytes": 614400,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw10u",
+      "cfa": "bggr",
+      "profile": "ov2640_raw10_bggr",
+      "note": "2 字节/像素,未转文本"
+    },
+    "ov2640_raw10_bggr_640x480.hex.txt": {
+      "bytes": 1843200,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw10u",
+      "cfa": "bggr",
+      "profile": "ov2640_raw10_bggr",
+      "note": "hex 文本,无前缀"
+    },
+    "ov2640_raw10_bggr_log_640x480.txt": {
+      "bytes": 2995200,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw10u",
+      "cfa": "bggr",
+      "profile": "ov2640_raw10_bggr",
+      "note": "hex 文本 + dmesg 时间戳前缀"
+    },
+    "raw10c_bggr_640x480.bin": {
+      "bytes": 614546,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw10u",
+      "cfa": "bggr",
+      "profile": "raw10_container",
+      "note": "容器 · 纯二进制"
+    },
+    "raw10c_bggr_hex_640x480.txt": {
+      "bytes": 1843638,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw10u",
+      "cfa": "bggr",
+      "profile": "raw10_container",
+      "note": "容器 · hex 文本载体"
+    },
+    "raw10c_bggr_lost12_640x480.bin": {
+      "bytes": 614534,
+      "width": 640,
+      "height": 480,
+      "fmt": "raw10u",
+      "cfa": "bggr",
+      "profile": "raw10_container",
+      "note": "容器 · 丢 12 字节"
+    },
+    "rgb565_xxd_640x480.txt": {
+      "bytes": 2611200,
+      "width": 640,
+      "height": 480,
+      "fmt": "rgb565",
+      "note": "xxd 风格 hexdump 文本"
+    },
+    "rgb565_stride1344_640x480.raw": {
+      "bytes": 645120,
+      "width": 640,
+      "height": 480,
+      "fmt": "rgb565",
+      "stride": 1344
+    }
+  }
+}

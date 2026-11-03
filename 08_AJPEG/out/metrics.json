@@ -1,0 +1,592 @@
+{
+  "generated": "2026-10-28T16:05:26",
+  "subsampling": "420",
+  "optimize": true,
+  "rle_mode": "best",
+  "images": [
+    {
+      "name": "alpha_soft.png",
+      "rel": "alpha_soft.png",
+      "width": 466,
+      "height": 466,
+      "png_bytes": 374938,
+      "alpha_png_bytes": 13322,
+      "has_alpha": true,
+      "qualities": [
+        {
+          "q": 70,
+          "jpeg_bytes": 40416,
+          "block_bytes": 153960,
+          "ajpeg_bytes": 194388,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 152076,
+          "rle_bytes": 152076,
+          "rle_nodes": 76038,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 31.424,
+          "ssim": 0.95873,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 7.161,
+          "vs_png": 0.5185,
+          "verify": true
+        },
+        {
+          "q": 85,
+          "jpeg_bytes": 58053,
+          "block_bytes": 153960,
+          "ajpeg_bytes": 212025,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 152076,
+          "rle_bytes": 152076,
+          "rle_nodes": 76038,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 34.453,
+          "ssim": 0.97877,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 7.811,
+          "vs_png": 0.5655,
+          "verify": true
+        },
+        {
+          "q": 95,
+          "jpeg_bytes": 96855,
+          "block_bytes": 153960,
+          "ajpeg_bytes": 250827,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 152076,
+          "rle_bytes": 152076,
+          "rle_nodes": 76038,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 38.801,
+          "ssim": 0.99411,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 9.24,
+          "vs_png": 0.669,
+          "verify": true
+        }
+      ]
+    },
+    {
+      "name": "alpha_sticker.png",
+      "rel": "alpha_sticker.png",
+      "width": 466,
+      "height": 466,
+      "png_bytes": 363989,
+      "alpha_png_bytes": 1533,
+      "has_alpha": true,
+      "qualities": [
+        {
+          "q": 70,
+          "jpeg_bytes": 40621,
+          "block_bytes": 5502,
+          "ajpeg_bytes": 46135,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 3618,
+          "rle_bytes": 3618,
+          "rle_nodes": 1809,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 31.725,
+          "ssim": 0.95948,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 1.7,
+          "vs_png": 0.1267,
+          "verify": true
+        },
+        {
+          "q": 85,
+          "jpeg_bytes": 57986,
+          "block_bytes": 5502,
+          "ajpeg_bytes": 63500,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 3618,
+          "rle_bytes": 3618,
+          "rle_nodes": 1809,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 34.951,
+          "ssim": 0.97943,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 2.339,
+          "vs_png": 0.1745,
+          "verify": true
+        },
+        {
+          "q": 95,
+          "jpeg_bytes": 95587,
+          "block_bytes": 5502,
+          "ajpeg_bytes": 101101,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 3618,
+          "rle_bytes": 3618,
+          "rle_nodes": 1809,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 39.42,
+          "ssim": 0.9943,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 3.725,
+          "vs_png": 0.2778,
+          "verify": true
+        }
+      ]
+    },
+    {
+      "name": "alpha_sticker_inv.png",
+      "rel": "alpha_sticker_inv.png",
+      "width": 466,
+      "height": 466,
+      "png_bytes": 355045,
+      "alpha_png_bytes": 1673,
+      "has_alpha": true,
+      "qualities": [
+        {
+          "q": 70,
+          "jpeg_bytes": 40284,
+          "block_bytes": 5502,
+          "ajpeg_bytes": 45798,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 3618,
+          "rle_bytes": 3618,
+          "rle_nodes": 1809,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 31.572,
+          "ssim": 0.95837,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 1.687,
+          "vs_png": 0.129,
+          "verify": true
+        },
+        {
+          "q": 85,
+          "jpeg_bytes": 57790,
+          "block_bytes": 5502,
+          "ajpeg_bytes": 63304,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 3618,
+          "rle_bytes": 3618,
+          "rle_nodes": 1809,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 34.56,
+          "ssim": 0.97881,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 2.332,
+          "vs_png": 0.1783,
+          "verify": true
+        },
+        {
+          "q": 95,
+          "jpeg_bytes": 96285,
+          "block_bytes": 5502,
+          "ajpeg_bytes": 101799,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 3618,
+          "rle_bytes": 3618,
+          "rle_nodes": 1809,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 38.912,
+          "ssim": 0.99411,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 3.75,
+          "vs_png": 0.2867,
+          "verify": true
+        }
+      ]
+    },
+    {
+      "name": "opaque.png",
+      "rel": "opaque.png",
+      "width": 466,
+      "height": 466,
+      "png_bytes": 360313,
+      "alpha_png_bytes": 751,
+      "has_alpha": false,
+      "qualities": [
+        {
+          "q": 70,
+          "jpeg_bytes": 39633,
+          "block_bytes": 3748,
+          "ajpeg_bytes": 43393,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 1864,
+          "rle_bytes": 1864,
+          "rle_nodes": 932,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 31.747,
+          "ssim": 0.95776,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 1.599,
+          "vs_png": 0.1204,
+          "verify": true
+        },
+        {
+          "q": 85,
+          "jpeg_bytes": 56862,
+          "block_bytes": 3748,
+          "ajpeg_bytes": 60622,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 1864,
+          "rle_bytes": 1864,
+          "rle_nodes": 932,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 34.839,
+          "ssim": 0.97834,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 2.233,
+          "vs_png": 0.1682,
+          "verify": true
+        },
+        {
+          "q": 95,
+          "jpeg_bytes": 94683,
+          "block_bytes": 3748,
+          "ajpeg_bytes": 98443,
+          "algo": "RLE",
+          "algo_id": 0,
+          "payload_bytes": 1864,
+          "rle_bytes": 1864,
+          "rle_nodes": 932,
+          "raw_alpha_bytes": 217156,
+          "table_bytes": 1868,
+          "psnr": 39.479,
+          "ssim": 0.994,
+          "jpeg": {
+            "sof": "SOF0",
+            "progressive": false,
+            "components": [
+              {
+                "id": 1,
+                "h": 2,
+                "v": 2,
+                "tq": 0
+              },
+              {
+                "id": 2,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              },
+              {
+                "id": 3,
+                "h": 1,
+                "v": 1,
+                "tq": 1
+              }
+            ],
+            "dqt": 2
+          },
+          "sampling": "4:2:0",
+          "baseline": true,
+          "bpp": 3.627,
+          "vs_png": 0.2732,
+          "verify": true
+        }
+      ]
+    }
+  ]
+}
