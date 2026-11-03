@@ -1,0 +1,935 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图片缩放算法对比 · 最近邻 vs 双线性</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #eceef4; background: #16171c; overflow: hidden; user-select: none;
+    display: flex; font-size: 13px;
+  }
+
+  /* ---------- 左侧控制栏 ---------- */
+  #panel {
+    width: 304px; flex: none; height: 100%; overflow-y: auto;
+    background: #1a1b21; border-right: 1px solid rgba(255,255,255,.07);
+    padding: 14px; display: flex; flex-direction: column; gap: 12px;
+  }
+  #panel::-webkit-scrollbar { width: 8px; }
+  #panel::-webkit-scrollbar-thumb { background: #2e3038; border-radius: 4px; }
+  #panel h1 { font-size: 14px; margin: 0; letter-spacing: .01em; }
+  #panel h1 span { display: block; font-size: 11px; font-weight: 400; opacity: .45; margin-top: 4px; }
+  .grp { display: flex; flex-direction: column; gap: 6px; }
+  .grp > label.head {
+    font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+    opacity: .45;
+  }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row > * { min-width: 0; }
+  select, input[type=number], button { font: inherit; color: #dfe2ea; }
+  select, input[type=number] {
+    background: #23252d; border: 1px solid rgba(255,255,255,.1); border-radius: 6px;
+    padding: 5px 6px; width: 100%; outline: none;
+  }
+  select:focus, input[type=number]:focus { border-color: #4a6cf7; }
+  button {
+    background: #23252d; border: 1px solid rgba(255,255,255,.1); border-radius: 6px;
+    padding: 6px 9px; cursor: pointer; white-space: nowrap; transition: background .12s, border-color .12s;
+  }
+  button:hover { background: #2c2f39; border-color: rgba(255,255,255,.18); }
+  button.primary { background: #34446e; border-color: #4a6cf7; }
+  button.primary:hover { background: #3c4f80; }
+  button.on { background: #34446e; border-color: #4a6cf7; color: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chips button { padding: 3px 7px; font-size: 11px; }
+  .chips button.on { background: #34446e; border-color: #4a6cf7; }
+
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 20px; background: transparent;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px; background: #33363f;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%;
+    background: #6b8afd; border: 2px solid #1a1b21; cursor: pointer;
+  }
+  input[type=range]:focus { outline: none; }
+  input[type=range]:focus::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(107,138,253,.25); }
+
+  input[type=checkbox] {
+    -webkit-appearance: none; appearance: none; width: 15px; height: 15px;
+    border: 1px solid rgba(255,255,255,.18); border-radius: 4px; background: #23252d;
+    cursor: pointer; position: relative; vertical-align: -3px; transition: background .12s, border-color .12s;
+  }
+  input[type=checkbox]:checked { background: #4a6cf7; border-color: #6b8afd; }
+  input[type=checkbox]:checked::after {
+    content: '✓'; position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; font-size: 11px; color: #fff; line-height: 1;
+  }
+  input[type=checkbox]:disabled { opacity: .4; cursor: default; }
+
+  .bigval { font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: -.02em; }
+  .bigval small { font-size: 11px; font-weight: 400; opacity: .45; margin-left: 4px; }
+  .hint { font-size: 11px; line-height: 1.55; opacity: .45; }
+  .divider { height: 1px; background: rgba(255,255,255,.07); }
+  .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; padding: 2px 0; }
+  .kv > b { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .kv > span { opacity: .5; }
+
+  table.alg { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  table.alg th, table.alg td { padding: 4px 5px; text-align: right; }
+  table.alg th:first-child, table.alg td:first-child { text-align: left; }
+  table.alg thead th { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; opacity: .4; font-weight: 700; }
+  table.alg tbody tr { border-top: 1px solid rgba(255,255,255,.06); }
+  table.alg td { font-variant-numeric: tabular-nums; }
+  table.alg .swatch { display: inline-block; width: 7px; height: 7px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+
+  /* ---------- 右侧舞台 ---------- */
+  #stage {
+    flex: 1; min-width: 0; height: 100%; display: flex; position: relative;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, #232637 0%, transparent 60%),
+      #101116;
+  }
+  .wrap {
+    flex: 1; min-width: 0; position: relative; overflow: hidden;
+    border-right: 1px solid rgba(255,255,255,.07);
+  }
+  .wrap:last-child { border-right: 0; }
+  .wrap canvas {
+    display: block; width: 100%; height: 100%; cursor: grab;
+    /* 极低对比的棋盘格:能看出透明区,但不抢图像的注意力 */
+    background-image:
+      linear-gradient(45deg, #191b21 25%, transparent 25%, transparent 75%, #191b21 75%),
+      linear-gradient(45deg, #191b21 25%, transparent 25%, transparent 75%, #191b21 75%);
+    background-size: 20px 20px; background-position: 0 0, 10px 10px;
+    background-color: #14151a;
+  }
+  .wrap canvas.dragging { cursor: grabbing; }
+  .cap {
+    position: absolute; top: 10px; left: 10px; z-index: 3;
+    font-size: 11px; letter-spacing: .02em; padding: 4px 9px; border-radius: 999px;
+    background: rgba(20,22,28,.82); border: 1px solid rgba(255,255,255,.1);
+    backdrop-filter: blur(6px); display: flex; gap: 7px; align-items: center;
+    pointer-events: none;
+  }
+  .cap i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .cap em { font-style: normal; opacity: .45; }
+  #splitter {
+    position: absolute; top: 0; bottom: 0; width: 15px; z-index: 5; cursor: ew-resize;
+    display: none; transform: translateX(-50%);
+  }
+  #splitter::before {
+    content: ''; position: absolute; top: 0; bottom: 0; left: 7px; width: 1px;
+    background: rgba(255,255,255,.75); box-shadow: 0 0 0 1px rgba(0,0,0,.5);
+  }
+  #splitter::after {
+    content: '⇔'; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 22px; height: 22px; border-radius: 50%; background: rgba(20,22,28,.9);
+    border: 1px solid rgba(255,255,255,.3); display: flex; align-items: center; justify-content: center;
+    font-size: 11px; margin-top: -11px;
+  }
+
+  #empty {
+    position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px;
+    align-items: center; justify-content: center; text-align: center; padding: 32px;
+    color: #8b8f9c; font-size: 13px; line-height: 1.7; pointer-events: none;
+  }
+  #empty b { color: #dfe2ea; font-weight: 600; }
+  #empty .dash {
+    padding: 26px 40px; border: 1.5px dashed rgba(255,255,255,.16); border-radius: 14px;
+  }
+  body.dropping #stage { outline: 2px solid #4a6cf7; outline-offset: -8px; }
+
+  /* 放大镜 */
+  #loupe {
+    position: absolute; right: 14px; bottom: 14px; z-index: 6; display: none;
+    background: rgba(16,17,22,.92); border: 1px solid rgba(255,255,255,.13);
+    border-radius: 10px; padding: 8px 9px; backdrop-filter: blur(8px);
+    box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  }
+  #loupe .lr { display: flex; gap: 8px; }
+  #loupe figure { margin: 0; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  #loupe canvas {
+    width: 108px; height: 108px; image-rendering: pixelated; border-radius: 4px;
+    background-color: #16181e;
+    background-image:
+      linear-gradient(45deg, #1d1f26 25%, transparent 25%, transparent 75%, #1d1f26 75%),
+      linear-gradient(45deg, #1d1f26 25%, transparent 25%, transparent 75%, #1d1f26 75%);
+    background-size: 8px 8px; background-position: 0 0, 4px 4px;
+  }
+  #loupe figcaption { font-size: 10px; opacity: .6; font-variant-numeric: tabular-nums; }
+  #loupe .lcoord { font-size: 10.5px; opacity: .5; margin-top: 6px; font-variant-numeric: tabular-nums; text-align: center; }
+  #loupe .lcoord b { color: #9fb2ff; font-weight: 600; }
+
+  #toast {
+    position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(12px);
+    background: rgba(20,22,28,.95); border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
+    padding: 8px 14px; font-size: 12px; opacity: 0; pointer-events: none; transition: .2s;
+    z-index: 9; max-width: 60%; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.err { border-color: #c2453f; color: #ffb4b0; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <h1>图片缩放算法对比<span>最近邻 vs 双线性 · 看得到的实际效果</span></h1>
+
+  <div class="grp">
+    <label class="head">图片</label>
+    <div class="row">
+      <button class="primary" id="btnImport" style="flex:1">导入图片…</button>
+      <button id="btnSample" title="载入内置示例图 wp-3.png">示例</button>
+    </div>
+    <input type="file" id="file" accept="image/*" multiple hidden>
+    <div class="hint" id="srcInfo">未载入图片。可以拖进来、粘贴(Ctrl+V),或点上面导入。</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="grp">
+    <label class="head">缩小倍数</label>
+    <div class="row" style="align-items:baseline">
+      <div class="bigval" id="factorVal">0.63<small>×</small></div>
+      <input type="number" id="factorNum" min="0.05" max="4" step="0.01" value="0.63"
+             style="width:78px;margin-left:auto">
+    </div>
+    <input type="range" id="factorRange" min="0.05" max="2" step="0.01" value="0.63">
+    <div class="chips" id="factorChips">
+      <button data-f="0.63" class="on">0.63</button>
+      <button data-f="0.5">0.5</button>
+      <button data-f="0.75">0.75</button>
+      <button data-f="0.9">0.9</button>
+      <button data-f="0.33">0.33</button>
+      <button data-f="0.25">0.25</button>
+    </div>
+    <div class="hint" id="dstInfo">—</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="grp">
+    <label class="head">对比算法</label>
+    <div class="row">
+      <select id="algoA">
+        <option value="nearest" selected>最近邻 Nearest</option>
+        <option value="bilinear">双线性 Bilinear</option>
+        <option value="area">面积平均 Area(box)</option>
+      </select>
+      <select id="algoB">
+        <option value="nearest">最近邻 Nearest</option>
+        <option value="bilinear" selected>双线性 Bilinear</option>
+        <option value="area">面积平均 Area(box)</option>
+      </select>
+    </div>
+    <button id="btnSwap">↔ 交换左右</button>
+    <div class="hint">面积平均不是「对比项」,是参照物 —— 它才是缩到该倍数时正确的样子。</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="grp">
+    <label class="head">视图</label>
+    <div class="chips" id="viewMode">
+      <button data-v="side" class="on">并排</button>
+      <button data-v="split">叠加分割</button>
+    </div>
+    <div class="chips" id="zoomChips">
+      <button data-z="fit" class="on">适应</button>
+      <button data-z="1">1×</button>
+      <button data-z="2">2×</button>
+      <button data-z="3">3×</button>
+      <button data-z="4">4×</button>
+      <button data-z="8">8×</button>
+    </div>
+    <div class="row">
+      <label style="font-size:11.5px;opacity:.7;flex:1;white-space:nowrap">差异图 <input type="checkbox" id="diffOn"></label>
+      <input type="number" id="diffGain" min="1" max="40" step="1" value="6" style="width:60px" title="差异放大倍数">
+    </div>
+    <select id="diffRef" title="差异图拿谁当基准">
+      <option value="area" selected>差异基准:面积平均参照</option>
+      <option value="other">差异基准:另一侧算法</option>
+    </select>
+    <div class="hint">滚轮缩放(以光标为中心)、拖动平移、<kbd>空格</kbd> 临时看原图。</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="grp">
+    <label class="head">指标</label>
+    <table class="alg" id="metrics">
+      <thead>
+        <tr><th>算法</th><th>vs 另一侧</th><th>vs 参照</th><th>耗时</th></tr>
+      </thead>
+      <tbody id="metricsBody">
+        <tr><td colspan="4" style="opacity:.4;text-align:left">载入图片后计算…</td></tr>
+      </tbody>
+    </table>
+    <div class="hint">
+      PSNR 单位 dB,数字越大越接近。<b>vs 另一侧</b>是两种算法彼此差多少,
+      <b>vs 参照</b>是各自离面积平均(正确答案)差多少 —— 后者才是「谁更准」。
+    </div>
+  </div>
+</div>
+
+<div id="stage">
+  <div class="wrap" id="wrapA">
+    <div class="cap" id="capA"><i style="background:#6b8afd"></i><b id="capAText">最近邻</b><em id="capAZoom"></em></div>
+    <canvas id="cvA"></canvas>
+  </div>
+  <div class="wrap" id="wrapB">
+    <div class="cap" id="capB"><i style="background:#f0a33c"></i><b id="capBText">双线性</b><em id="capBZoom"></em></div>
+    <canvas id="cvB"></canvas>
+  </div>
+  <div id="splitter"></div>
+
+  <div id="empty">
+    <div class="dash">
+      <b>把图片拖到这里</b><br>
+      或者点左边「导入图片…」/ 按 Ctrl+V 粘贴
+    </div>
+  </div>
+
+  <div id="loupe">
+    <div class="lr">
+      <figure><canvas id="loupeA" width="108" height="108"></canvas><figcaption id="loupeCapA">A</figcaption></figure>
+      <figure><canvas id="loupeB" width="108" height="108"></canvas><figcaption id="loupeCapB">B</figcaption></figure>
+    </div>
+    <div class="lcoord" id="loupeCoord">—</div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script src="scale-core.js"></script>
+<script src="sample-data.js" onerror="window.__noSample=1"></script>
+<script>
+(function () {
+  'use strict';
+  const S = window.ScaleCore;
+
+  const ALGO_NAME = { nearest: '最近邻', bilinear: '双线性', area: '面积平均' };
+  const ALGO_COLOR = { nearest: '#6b8afd', bilinear: '#f0a33c', area: '#4fc99a' };
+
+  const $ = (id) => document.getElementById(id);
+
+  /* ---------------- 状态 ---------------- */
+  const st = {
+    src: null,          // {data,width,height,canvas}
+    srcName: '',
+    factor: 0.63,
+    algoA: 'nearest',
+    algoB: 'bilinear',
+    viewMode: 'side',
+    zoomMode: 'fit',
+    zoom: 1,
+    panX: 0, panY: 0,
+    diffOn: false,
+    diffGain: 6,
+    diffRef: 'area',    // 'area' 面积平均作基准 | 'other' 另一侧算法作基准
+    splitX: 0.5,        // 叠加分割线位置(0..1,相对画布)
+    showOriginal: false,
+    out: {},            // 算法 -> {image, canvas, ms}
+    metric: [],
+    dest: [0, 0],
+    loupePos: null,     // {x,y} 输出图像坐标
+  };
+
+  let rafPending = false;
+  function schedule() {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => { rafPending = false; render(); });
+  }
+
+  /* ---------------- 图片载入 ---------------- */
+  let toastTimer = 0;
+  function toast(msg, isErr) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.toggle('err', !!isErr);
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+
+  /* 从 URL 载入 → ImageData。file:// 下 drawImage 外部文件会污染 canvas,
+     所以内置示例图走 base64(sample-data.js),用户导入走 FileReader 的 data: URL。 */
+  function loadImageURL(url, name) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth; c.height = img.naturalHeight;
+          const ctx = c.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(img, 0, 0);
+          const data = ctx.getImageData(0, 0, c.width, c.height);
+          resolve({ data: data.data, width: c.width, height: c.height, img });
+        } catch (e) { reject(e); }
+      };
+      img.onerror = () => reject(new Error('图片解码失败:' + name));
+      img.src = url;
+    });
+  }
+
+  function setSource(src, name) {
+    st.src = src;
+    st.srcName = name || '';
+    st.loupePos = null;
+    $('empty').style.display = 'none';
+    $('srcInfo').innerHTML = '<b>' + esc(name || '图片') + '</b><br>'
+      + src.width + ' × ' + src.height + ' px';
+    $('btnSample').disabled = false;
+    compute();
+    fitView();
+    schedule();
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  function importFiles(files) {
+    const list = Array.from(files || []).filter((f) => /^image\//.test(f.type));
+    if (!list.length) { toast('没有可用的图片文件', true); return; }
+    // 只取第一张作为源图;多选时提示
+    const f = list[0];
+    if (list.length > 1) toast('一次对比一张图,已载入 ' + f.name);
+    const fr = new FileReader();
+    fr.onload = () => {
+      loadImageURL(fr.result, f.name)
+        .then((src) => setSource(src, f.name))
+        .catch((e) => toast(e.message || '载入失败', true));
+    };
+    fr.onerror = () => toast('读取文件失败', true);
+    fr.readAsDataURL(f);
+  }
+
+  /* ---------------- 计算 ---------------- */
+  function compute() {
+    if (!st.src) return;
+    const sw = st.src.width, sh = st.src.height;
+    const [dw, dh] = S.destSize(sw, sh, st.factor);
+    st.dest = [dw, dh];
+
+    $('dstInfo').textContent = sw + '×' + sh + ' → ' + dw + '×' + dh
+      + '  (' + ((dw * dh) / (sw * sh) * 100).toFixed(1) + '% 像素)';
+
+    const src = { data: st.src.data, width: sw, height: sh };
+    const algos = ['nearest', 'bilinear', 'area'];
+    const out = {};
+    let ref = null;
+
+    for (const k of algos) {
+      // 大图算 3 次取最小值,削弱 JIT/GC 抖动
+      const runs = dw * dh > 4000000 ? 1 : 3;
+      let best = Infinity, img = null;
+      for (let i = 0; i < runs; i++) {
+        const t0 = performance.now();
+        const r = k === 'nearest' ? S.nearest(src, dw, dh)
+          : k === 'bilinear' ? S.bilinear(src, dw, dh)
+            : S.areaAverage(src, dw, dh);
+        const dt = performance.now() - t0;
+        if (dt < best) { best = dt; img = r; }
+      }
+      const cv = document.createElement('canvas');
+      cv.width = dw; cv.height = dh;
+      cv.getContext('2d').putImageData(new ImageData(img.data, dw, dh), 0, 0);
+      out[k] = { image: img, canvas: cv, ms: best, cache: {} };
+      if (k === 'area') ref = img;
+    }
+    // 差异图缓存清空
+    for (const k of algos) out[k].diffCache = null;
+    st.out = out;
+    st.ref = ref;
+
+    updateMetrics();
+    updateCaps();
+  }
+
+  function getDiff(aName, bName, gain) {
+    const key = aName + '>' + bName;
+    const cur = st.out[aName];
+    if (cur.diffCache && cur.diffCache.key === key && cur.diffCache.gain === gain) {
+      return cur.diffCache.canvas;
+    }
+    const img = S.diffImage(st.out[aName].image, st.out[bName].image, gain);
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    cv.getContext('2d').putImageData(new ImageData(img.data, img.width, img.height), 0, 0);
+    cur.diffCache = { key, gain, canvas: cv };
+    return cv;
+  }
+
+  function fmtP(v) { return v === Infinity ? '∞' : v.toFixed(2); }
+
+  function updateMetrics() {
+    const tb = $('metricsBody');
+    const a = st.out[st.algoA], b = st.out[st.algoB], ref = st.out.area;
+    const ab = a.image, bb = b.image;
+    const rows = [];
+    for (const [k, o] of [[st.algoA, a], [st.algoB, b]]) {
+      const other = k === st.algoA ? bb : ab;
+      const pOther = S.psnr(o.image, other);
+      const pRef = S.psnr(o.image, ref.image);
+      rows.push({ k, pOther, pRef, ms: o.ms });
+    }
+    st.metric = rows;
+    const mad = S.maxAbsDiff(ab, bb);
+    tb.innerHTML = rows.map((r) =>
+      '<tr><td><span class="swatch" style="background:' + ALGO_COLOR[r.k] + '"></span>'
+      + ALGO_NAME[r.k] + '</td><td>' + fmtP(r.pOther) + '</td><td>' + fmtP(r.pRef)
+      + '</td><td>' + r.ms.toFixed(1) + ' ms</td></tr>'
+    ).join('') + '<tr><td colspan="4" style="opacity:.45;text-align:left;padding-top:7px">'
+      + '两者最大通道差 ' + mad + ' / 255</td></tr>';
+  }
+
+  function updateCaps() {
+    $('capAText').textContent = ALGO_NAME[st.algoA] + (st.showOriginal ? ' · 原图' : '');
+    $('capBText').textContent = ALGO_NAME[st.algoB] + (st.showOriginal ? ' · 原图' : '');
+    document.querySelector('#capA i').style.background = ALGO_COLOR[st.algoA];
+    document.querySelector('#capB i').style.background = ALGO_COLOR[st.algoB];
+    $('diffGain').disabled = !st.diffOn;
+    $('diffGain').style.opacity = st.diffOn ? 1 : .4;
+  }
+
+  /* ---------------- 视图 ---------------- */
+  function panes() {
+    return [
+      { wrap: $('wrapA'), cv: $('cvA'), which: 'A' },
+      { wrap: $('wrapB'), cv: $('cvB'), which: 'B' },
+    ];
+  }
+
+  function resizeCanvas(cv) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = cv.clientWidth, h = cv.clientHeight;
+    const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+    if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+    return { dpr, w, h };
+  }
+
+  /* 并排时左右等宽,叠加时只有 wrapA 可见 —— 统一用 wrapA 的尺寸做视图基准。 */
+  function viewSize() {
+    return { w: $('wrapA').clientWidth, h: $('wrapA').clientHeight };
+  }
+
+  /* 「适应」永远按输出尺寸算:切换算法时输出尺寸不变,视图就不会跳。 */
+  function fitView() {
+    if (!st.src) return;
+    const [dw, dh] = st.dest;
+    const { w, h } = viewSize();
+    const pad = 28;
+    const z = Math.min((w - pad * 2) / dw, (h - pad * 2) / dh);
+    st.zoom = z > 0 ? z : 1;
+    st.panX = (w - dw * st.zoom) / 2;
+    st.panY = (h - dh * st.zoom) / 2;
+    st.zoomMode = 'fit';
+    syncZoomChips();
+    schedule();
+  }
+
+  function setZoom(z, focus) {
+    if (!st.src) return;
+    z = Math.max(0.02, Math.min(64, z));
+    const { w, h } = viewSize();
+    const fx = focus ? focus.x : w / 2;
+    const fy = focus ? focus.y : h / 2;
+    const ix = (fx - st.panX) / st.zoom;
+    const iy = (fy - st.panY) / st.zoom;
+    st.zoom = z;
+    st.panX = fx - ix * z;
+    st.panY = fy - iy * z;
+    st.zoomMode = 'custom';
+    syncZoomChips();
+    schedule();
+  }
+
+  function syncZoomChips() {
+    document.querySelectorAll('#zoomChips button').forEach((b) => {
+      const v = b.dataset.z;
+      const on = v === 'fit' ? st.zoomMode === 'fit' : st.zoomMode === 'custom' && Math.abs(parseFloat(v) - st.zoom) < 1e-6;
+      b.classList.toggle('on', !!on);
+    });
+  }
+
+  /* 画一块画布:which = 'A' | 'B' | 'split' */
+  function drawPane(cv, which) {
+    const { dpr, w, h } = resizeCanvas(cv);
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (!st.src) return;
+
+    // 空格按住 = 看原图(缩放/平移照旧,内容换成源图)
+    const srcCanvas = st.showOriginal ? makeSrcCanvas() : null;
+
+    if (which === 'split') {
+      const s = Math.max(0.001, Math.min(0.999, st.splitX));
+      const cx = s * w;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, cx, h); ctx.clip();
+      paint(ctx, srcCanvas || paneCanvas(st.algoA));
+      ctx.restore();
+      ctx.save();
+      ctx.beginPath(); ctx.rect(cx, 0, w - cx, h); ctx.clip();
+      paint(ctx, srcCanvas || paneCanvas(st.algoB));
+      ctx.restore();
+      return;
+    }
+
+    paint(ctx, srcCanvas || paneCanvas(which === 'A' ? st.algoA : st.algoB));
+  }
+
+  let _srcCanvas = null;
+  function makeSrcCanvas() {
+    if (_srcCanvas && _srcCanvas._d === st.src.data) return _srcCanvas;
+    const c = document.createElement('canvas');
+    c.width = st.src.width; c.height = st.src.height;
+    c.getContext('2d').putImageData(
+      new ImageData(new Uint8ClampedArray(st.src.data), st.src.width, st.src.height), 0, 0);
+    c._d = st.src.data;
+    _srcCanvas = c;
+    return c;
+  }
+
+  /* 差异图:基准可选「面积平均」(看谁更正确)或「另一侧」(看两者差异)。
+     以面积为基准时左右各画各的,叠加分割才有意义。 */
+  function paneCanvas(algo) {
+    if (st.diffOn) {
+      const ref = st.diffRef === 'other'
+        ? (algo === st.algoA ? st.algoB : st.algoA)
+        : 'area';
+      if (ref !== algo) return getDiff(algo, ref, st.diffGain);
+    }
+    const o = st.out[algo];
+    return o ? o.canvas : null;
+  }
+
+  function paint(ctx, canvas) {
+    if (!canvas) return;
+    ctx.imageSmoothingEnabled = false;   // 关键:1:1 像素级显示,不要再插值一次
+    ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height,
+      st.panX, st.panY, canvas.width * st.zoom, canvas.height * st.zoom);
+  }
+
+  function render() {
+    if (st.viewMode === 'split') {
+      $('wrapB').style.display = 'none';
+      $('wrapA').style.flex = '1';
+      $('splitter').style.display = 'block';
+      $('splitter').style.left = (st.splitX * 100) + '%';
+      document.querySelector('#capB').style.display = 'none';
+      $('capAText').textContent = ALGO_NAME[st.algoA] + ' ⇔ ' + ALGO_NAME[st.algoB]
+        + (st.showOriginal ? ' · 原图' : '');
+      drawPane($('cvA'), 'split');
+    } else {
+      $('wrapB').style.display = '';
+      $('splitter').style.display = 'none';
+      document.querySelector('#capB').style.display = '';
+      updateCaps();
+      drawPane($('cvA'), 'A');
+      drawPane($('cvB'), 'B');
+    }
+    updateZoomLabels();
+    updateLoupe();
+  }
+
+  function updateZoomLabels() {
+    const t = st.zoom % 1 === 0 ? st.zoom + '×' : st.zoom.toFixed(2) + '×';
+    $('capAZoom').textContent = t;
+    $('capBZoom').textContent = t;
+  }
+
+  /* ---------------- 放大镜 ---------------- */
+  const LOUPE_PX = 12;   // 显示 12×12 个输出像素
+
+  function stagePoint(e) {
+    const r = $('stage').getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  /* 屏幕坐标 → 输出图像坐标(两个 pane 布局一致时通用) */
+  function toOutPoint(clientX, clientY, wrapEl) {
+    const r = wrapEl.getBoundingClientRect();
+    return {
+      x: (clientX - r.left - st.panX) / st.zoom,
+      y: (clientY - r.top - st.panY) / st.zoom,
+    };
+  }
+
+  function updateLoupe() {
+    const box = $('loupe');
+    if (!st.src || !st.loupePos || st.showOriginal) { box.style.display = 'none'; return; }
+    const half = LOUPE_PX / 2;
+    const { x, y } = st.loupePos;
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const inside = ix >= 0 && iy >= 0 && ix < st.dest[0] && iy < st.dest[1];
+    if (!inside) { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+
+    const draw = (cvId, algoName) => {
+      const cv = $(cvId);
+      const ctx = cv.getContext('2d');
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      const o = st.out[algoName];
+      if (!o) return;
+      // 输出 1:1 取样:12 个输出像素铺满 108px,每格 9px
+      ctx.drawImage(o.canvas,
+        ix - half, iy - half, LOUPE_PX, LOUPE_PX,
+        0, 0, cv.width, cv.height);
+      const cell = cv.width / LOUPE_PX;
+      const c0 = Math.floor(LOUPE_PX / 2) * cell;
+      ctx.strokeStyle = 'rgba(255,255,255,.6)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(c0 + .5, c0 + .5, cell, cell);
+    };
+    draw('loupeA', st.algoA);
+    draw('loupeB', st.algoB);
+
+    $('loupeCapA').innerHTML = '<span class="swatch" style="background:' + ALGO_COLOR[st.algoA] + '"></span>' + ALGO_NAME[st.algoA];
+    $('loupeCapB').innerHTML = '<span class="swatch" style="background:' + ALGO_COLOR[st.algoB] + '"></span>' + ALGO_NAME[st.algoB];
+
+    const sx = Math.floor((ix + 0.5) * st.src.width / st.dest[0]);
+    const sy = Math.floor((iy + 0.5) * st.src.height / st.dest[1]);
+    $('loupeCoord').innerHTML =
+      '输出 <b>' + ix + ',' + iy + '</b> · 源 ≈ <b>' + sx + ',' + sy + '</b><br>'
+      + 'A ' + samplePixel(st.out[st.algoA], ix, iy)
+      + ' &nbsp; B ' + samplePixel(st.out[st.algoB], ix, iy);
+  }
+
+  function samplePixel(o, x, y) {
+    if (!o) return '';
+    const d = o.image.data, i = (y * o.image.width + x) * 4;
+    return d[i] + ',' + d[i + 1] + ',' + d[i + 2] + (d[i + 3] === 255 ? '' : ',' + d[i + 3]);
+  }
+
+  /* ---------------- 交互 ---------------- */
+  function bindPanZoom(cv, which) {
+    let drag = null;
+    cv.addEventListener('pointerdown', (e) => {
+      if (!st.src) return;
+      cv.setPointerCapture(e.pointerId);
+      cv.classList.add('dragging');
+      drag = { x: e.clientX, y: e.clientY, px: st.panX, py: st.panY, moved: false };
+    });
+    cv.addEventListener('pointermove', (e) => {
+      if (!st.src) return;
+      if (drag) {
+        const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+        if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
+        st.panX = drag.px + dx;
+        st.panY = drag.py + dy;
+        st.zoomMode = 'custom';
+        schedule();
+      }
+      const overA = e.clientX < $('wrapA').getBoundingClientRect().right;
+      if (st.viewMode !== 'split' || overA) {
+        const p = toOutPoint(e.clientX, e.clientY, cv);
+        st.loupePos = { x: p.x, y: p.y };
+        schedule();
+      }
+    });
+    const end = (e) => {
+      if (!drag) return;
+      cv.classList.remove('dragging');
+      drag = null;
+    };
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+    cv.addEventListener('pointerleave', () => {
+      if (st.loupePos) { st.loupePos = null; schedule(); }
+    });
+    cv.addEventListener('wheel', (e) => {
+      if (!st.src) return;
+      e.preventDefault();
+      const r = cv.getBoundingClientRect();
+      const focus = { x: e.clientX - r.left, y: e.clientY - r.top };
+      const k = Math.exp(-e.deltaY * 0.0015);
+      setZoom(st.zoom * k, focus);
+    }, { passive: false });
+  }
+
+  bindPanZoom($('cvA'), 'A');
+  bindPanZoom($('cvB'), 'B');
+
+  // 分割线拖动
+  (function () {
+    const sp = $('splitter');
+    let dragging = false;
+    const move = (e) => {
+      if (!dragging) return;
+      const r = $('wrapA').getBoundingClientRect();
+      st.splitX = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      schedule();
+    };
+    sp.addEventListener('pointerdown', (e) => { dragging = true; sp.setPointerCapture(e.pointerId); });
+    sp.addEventListener('pointermove', move);
+    sp.addEventListener('pointerup', () => { dragging = false; });
+    sp.addEventListener('pointercancel', () => { dragging = false; });
+  })();
+
+  // 缩放倍数
+  const fRange = $('factorRange'), fNum = $('factorNum');
+  function setFactor(v, from) {
+    v = Math.max(0.05, Math.min(4, Number(v) || 0.63));
+    st.factor = v;
+    $('factorVal').innerHTML = (v % 1 === 0 ? v : v.toFixed(2)).replace(/0$/, '') + '<small>×</small>';
+    if (from !== 'range') fRange.value = Math.min(2, Math.max(0.05, v));
+    if (from !== 'num') fNum.value = v;
+    document.querySelectorAll('#factorChips button').forEach((b) => {
+      b.classList.toggle('on', Math.abs(parseFloat(b.dataset.f) - v) < 1e-6);
+    });
+    if (st.src) { compute(); schedule(); updateLoupeIcons(); }
+  }
+  function updateLoupeIcons() { /* caption 已在 updateLoupe 里刷新 */ }
+  fRange.addEventListener('input', (e) => setFactor(e.target.value, 'range'));
+  fNum.addEventListener('input', (e) => {
+    if (e.target.value === '' || e.target.value === '-') return;
+    setFactor(e.target.value, 'num');
+  });
+  $('factorChips').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (b) setFactor(parseFloat(b.dataset.f), 'chips');
+  });
+
+  // 算法
+  $('algoA').addEventListener('change', (e) => {
+    st.algoA = e.target.value;
+    if (st.algoA === st.algoB) { st.algoB = st.algoA === 'bilinear' ? 'nearest' : 'bilinear'; $('algoB').value = st.algoB; }
+    updateMetrics(); updateCaps(); schedule();
+  });
+  $('algoB').addEventListener('change', (e) => {
+    st.algoB = e.target.value;
+    if (st.algoB === st.algoA) { st.algoA = st.algoB === 'bilinear' ? 'nearest' : 'bilinear'; $('algoA').value = st.algoA; }
+    updateMetrics(); updateCaps(); schedule();
+  });
+  $('btnSwap').addEventListener('click', () => {
+    const t = st.algoA; st.algoA = st.algoB; st.algoB = t;
+    $('algoA').value = st.algoA; $('algoB').value = st.algoB;
+    updateMetrics(); updateCaps(); schedule();
+  });
+
+  // 视图模式 / 缩放
+  $('viewMode').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    st.viewMode = b.dataset.v;
+    document.querySelectorAll('#viewMode button').forEach((x) => x.classList.toggle('on', x === b));
+    st.loupePos = null;
+    requestAnimationFrame(() => { if (st.zoomMode === 'fit') fitView(); else schedule(); });
+  });
+  $('zoomChips').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.z === 'fit') fitView();
+    else { st.zoomMode = 'custom'; setZoom(parseFloat(b.dataset.z)); }
+  });
+  $('diffOn').addEventListener('change', (e) => { st.diffOn = e.target.checked; updateCaps(); schedule(); });
+  $('diffGain').addEventListener('input', (e) => {
+    st.diffGain = Math.max(1, Math.min(40, parseInt(e.target.value, 10) || 6));
+    schedule();
+  });
+  $('diffRef').addEventListener('change', (e) => { st.diffRef = e.target.value; schedule(); });
+
+  // 导入
+  $('btnImport').addEventListener('click', () => $('file').click());
+  $('file').addEventListener('change', (e) => { importFiles(e.target.files); e.target.value = ''; });
+
+  const hasSample = !window.__noSample && window.SAMPLE && window.SAMPLE.length;
+  $('btnSample').addEventListener('click', () => {
+    if (!hasSample) { toast('缺少 sample-data.js,请先运行 make_sample.py', true); return; }
+    const item = window.SAMPLE[0];
+    loadImageURL(item.src, item.name)
+      .then((src) => setSource(src, item.name))
+      .catch((e) => toast(e.message || '示例图载入失败', true));
+  });
+  if (!hasSample) {
+    $('btnSample').title = '缺少 sample-data.js';
+    $('btnSample').style.opacity = .45;
+  }
+
+  // 拖放
+  let dragDepth = 0;
+  window.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+    dragDepth++; document.body.classList.add('dropping'); e.preventDefault();
+  });
+  window.addEventListener('dragover', (e) => { e.preventDefault(); });
+  window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dropping'); } });
+  window.addEventListener('drop', (e) => {
+    e.preventDefault(); dragDepth = 0; document.body.classList.remove('dropping');
+    if (e.dataTransfer.files && e.dataTransfer.files.length) importFiles(e.dataTransfer.files);
+  });
+
+  // 粘贴
+  window.addEventListener('paste', (e) => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const it of items) {
+      if (it.type.indexOf('image/') === 0) {
+        const f = it.getAsFile();
+        if (f) { importFiles([f]); e.preventDefault(); return; }
+      }
+    }
+  });
+
+  // 键盘
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.code === 'Space' && !e.repeat) { e.preventDefault(); st.showOriginal = true; updateCaps(); schedule(); }
+    else if (e.key === '0') fitView();
+    else if (e.key === '+' || e.key === '=') setZoom(st.zoom * 1.25);
+    else if (e.key === '-' || e.key === '_') setZoom(st.zoom / 1.25);
+    else if (e.key === 'd' || e.key === 'D') { st.diffOn = !st.diffOn; $('diffOn').checked = st.diffOn; updateCaps(); schedule(); }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Space') { e.preventDefault(); st.showOriginal = false; updateCaps(); schedule(); }
+  });
+  window.addEventListener('blur', () => {
+    if (st.showOriginal) { st.showOriginal = false; updateCaps(); schedule(); }
+  });
+
+  window.addEventListener('resize', () => {
+    if (st.zoomMode === 'fit') fitView(); else schedule();
+  });
+
+  /* ---------------- 自检 ---------------- */
+  (function selfTest() {
+    // 4×1 灰度图,缩到 0.5 → 双线性应得两端原值、最近邻应得硬拷贝
+    const src = { data: new Uint8ClampedArray([0, 0, 0, 255, 100, 100, 100, 255, 200, 200, 200, 255, 255, 255, 255, 255]), width: 4, height: 1 };
+    const nn = S.nearest(src, 2, 1);
+    const bl = S.bilinear(src, 2, 1);
+    const av = S.areaAverage(src, 2, 1);
+    const ok = [];
+    ok.push(nn.data[0] === 100 && nn.data[4] === 200);          // 取中心最近
+    ok.push(bl.data[0] === 25 && bl.data[4] === 225);           // 0.25/0.75 加权
+    ok.push(Math.abs(av.data[0] - 50) <= 1);                    // 面积平均
+    ok.push(Math.abs(S.psnr(nn, nn) - Infinity) < 1e-9);
+    const bad = ok.filter((v) => !v).length;
+    if (bad) console.error('[scale-core] 自检失败 ' + bad + ' 项', { nn: Array.from(nn.data), bl: Array.from(bl.data), av: Array.from(av.data) });
+    else console.log('[scale-core] 自检通过');
+  })();
+
+  /* ---------------- 启动 ---------------- */
+  setFactor(0.63, 'init');
+  if (hasSample) {
+    loadImageURL(window.SAMPLE[0].src, window.SAMPLE[0].name)
+      .then((src) => setSource(src, window.SAMPLE[0].name))
+      .catch(() => {});
+  } else {
+    render();
+  }
+})();
+</script>
+</body>
+</html>

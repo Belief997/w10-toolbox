@@ -19,4 +19,8 @@ AJPEG/out/
 AJPEG/out_single/
 AJPEG/samples/
 AJPEG/_check.js
+10_scale_img/sample-data.js
+10_scale_img/*.png.tmp
+smoke-shot.png
+shot-*.png
 __pycache__/
