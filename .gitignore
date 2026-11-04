@@ -21,6 +21,8 @@ AJPEG/samples/
 AJPEG/_check.js
 10_scale_img/sample-data.js
 10_scale_img/*.png.tmp
+11_polaroid/_shots/
+11_polaroid/_smoke.log
 smoke-shot.png
 shot-*.png
 __pycache__/

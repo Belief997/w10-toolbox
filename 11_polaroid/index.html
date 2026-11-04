@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>宝丽来 i-Type 显影盒 · 3D 预览</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23f0f0ec'/><rect x='2' y='2' width='3' height='12' fill='%23d65649'/><rect x='5' y='2' width='3' height='12' fill='%23ef8c49'/><rect x='8' y='2' width='3' height='12' fill='%23ffc857'/></svg>">
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #0e0f12; color: #eceef4; overflow: hidden; user-select: none;
+  }
+
+  /* 渲染画布 */
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+
+  /* 顶部标题 */
+  #title {
+    position: fixed; left: 28px; top: 24px; pointer-events: none;
+    font-size: 13px; letter-spacing: .02em;
+  }
+  #title strong { font-weight: 600; font-size: 15px; }
+  #title span { display: block; margin-top: 5px; opacity: .38; font-size: 11.5px; }
+
+  /* 底部控制条 */
+  #panel {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 16px 10px 12px; border-radius: 999px;
+    background: rgba(24,25,30,.82); backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,.09);
+    box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  }
+  #panel button {
+    font: inherit; font-size: 12.5px; color: inherit; cursor: pointer;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 999px; padding: 7px 16px; transition: background .16s;
+  }
+  #panel button:hover { background: rgba(255,255,255,.15); }
+  #panel button.on { background: #eceef4; color: #16171c; border-color: #eceef4; }
+  #panel .sep { width: 1px; height: 20px; background: rgba(255,255,255,.12); }
+  #panel label { font-size: 11.5px; opacity: .55; white-space: nowrap; }
+  #panel input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 132px; height: 3px;
+    border-radius: 2px; background: rgba(255,255,255,.18); outline: none;
+  }
+  #panel input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%;
+    background: #eceef4; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.5);
+  }
+
+  /* 右下角提示 */
+  #hint {
+    position: fixed; right: 28px; bottom: 30px; font-size: 11px;
+    opacity: .3; line-height: 1.7; text-align: right; pointer-events: none;
+  }
+
+  /* 加载 / 报错 */
+  #boot {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; background: #0e0f12; z-index: 10;
+    font-size: 12.5px; transition: opacity .5s;
+  }
+  #boot.done { opacity: 0; pointer-events: none; }
+  #boot .bar { width: 160px; height: 2px; background: rgba(255,255,255,.1); overflow: hidden; border-radius: 2px; }
+  #boot .bar i { display: block; width: 40%; height: 100%; background: #eceef4; animation: run 1.1s ease-in-out infinite; }
+  @keyframes run { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+  #boot small { opacity: .4; font-size: 11px; }
+  #boot.error .bar { display: none; }
+  #boot.error { color: #ff9a9a; text-align: center; padding: 0 40px; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+
+<div id="title">
+  <strong>Polaroid i-Type 显影盒</strong>
+  <span>WebGPU · 白壳 / 银边 / 彩虹色条 · 顶盖斜开</span>
+</div>
+
+<div id="panel">
+  <button id="btnDoor">开舱门</button>
+  <input id="slDoor" type="range" min="0" max="1" step="0.001" value="0">
+  <div class="sep"></div>
+  <button id="btnSpin" class="on">自动旋转</button>
+</div>
+
+<div id="hint">拖拽旋转 · 滚轮缩放<br>右键 / 双指平移</div>
+
+<div id="boot">
+  <div class="bar"><i></i></div>
+  <small id="bootMsg">正在准备 WebGPU…</small>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./lib/three.webgpu.js",
+    "three/tsl": "./lib/three.tsl.js",
+    "three/webgpu": "./lib/three.webgpu.js"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
