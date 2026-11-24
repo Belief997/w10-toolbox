@@ -144,9 +144,15 @@
   // makeCanvas(w, h) -> 带 getContext('2d') 的对象。浏览器里就是
   // document.createElement('canvas'),Node 里是 selftest 的假 canvas。
   //
-  // opt.size        输出边长,0/省略 = 0.75 × 短边(源分辨率,不重采样)
+  // opt.size        贴图边长,0/省略 = 0.75 × 短边(源分辨率,不重采样)
+  // opt.canvas      { w, h } 输出画布尺寸,省略 = 正方形 size×size。
+  //                 比贴图大时贴图居中、四周留透明 —— 让导出图和原图同像素用。
   // opt.background  底色(null = 透明;给值则用 destination-over 垫在下面,
   //                 这样抗锯齿的半透明边缘压在底色上而不是半透明白边)
+  //
+  // 画布大于贴图时,空白必须是**透明**而不是铺满:设备侧 paintCover 会把整张图
+  // 按短边居中裁方再拉伸填满 466,贴图占画布 0.75 才能让 2 环落回 349.5。
+  // 把贴图拉伸到铺满画布的话,2 环会跑到 0.5 —— 比例就错了。
   function renderSprite(makeCanvas, img, spec, opt) {
     const o = opt || {};
     const iw = img.naturalWidth || img.width;
@@ -154,27 +160,134 @@
     if (!iw || !ih) throw new Error('图片没有尺寸');
 
     const size = Math.max(1, Math.round(+o.size || outputSide(iw, ih, spec.side)));
-    const out = makeCanvas(size, size);
+    // 画布不能小于贴图,否则贴图会被裁掉一块
+    const cw = Math.max(size, Math.round(o.canvas ? +o.canvas.w || 0 : size));
+    const ch = Math.max(size, Math.round(o.canvas ? +o.canvas.h || 0 : size));
+    const ox = Math.round((cw - size) / 2);
+    const oy = Math.round((ch - size) / 2);
+
+    const out = makeCanvas(cw, ch);
     const ctx = out.getContext('2d');
     const rect = sourceRect(iw, ih, spec.side);
 
-    ctx.clearRect(0, 0, size, size);
+    ctx.clearRect(0, 0, cw, ch);
     if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h, 0, 0, size, size);
+    ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h, ox, oy, size, size);
 
-    const data = ctx.getImageData(0, 0, size, size);
+    // 只扫贴图那一块:留边是画布初始化就透明的,不必逐像素过一遍
+    const data = ctx.getImageData(ox, oy, size, size);
     applyMask(data.data, size, size, spec.bands);
-    ctx.putImageData(data, 0, 0);
+    ctx.putImageData(data, ox, oy);
 
     if (o.background) {
       ctx.save();
       ctx.globalCompositeOperation = 'destination-over';
       ctx.fillStyle = o.background;
-      ctx.fillRect(0, 0, size, size);
+      ctx.fillRect(0, 0, cw, ch);
       ctx.restore();
     }
 
-    return { canvas: out, size: size, rect: rect, spec: spec };
+    return { canvas: out, size: size, w: cw, h: ch, ox: ox, oy: oy, rect: rect, spec: spec };
+  }
+
+  // ---------- Mask ----------
+
+  const MASK_SIZE = 480;   // mask 固定 480²,和源图分辨率无关(纯几何)
+
+  // 环带是相对「贴图边长」归一化的,而 mask 画布是整张外接正方形 ——
+  // 半径要乘回 spec.side。乘完正好落回 466 基准的比例:0.125 与 0.25…0.375。
+  function bandsOnCanvas(spec) {
+    return spec.bands.map(([a, b]) => [a * spec.side, b * spec.side]);
+  }
+
+  // ---------- 调试图案 ----------
+  // 规则几何图案,用同样的 480² / 纯白 + 透明画法,专门给「在设备上量偏移和缩放」用。
+  // 环形 mask 只能看出「圆环对不齐」,看不住到底是平移错还是缩放错;
+  // 方格和半透能把这两个自由度分开量 —— 格子边界落在哪几个像素,偏移就直接读出来了。
+
+  // 每个图案返回 (x, y) → 0…1 的覆盖率。size 是画布边长,图案按 size 归一化。
+  const PATTERN = {
+    // 上下对半:上半不透明,下半透明
+    halves: (x, y, size) => (y + 0.5 < size / 2 ? 1 : 0),
+
+    // 左右对半
+    vhalves: (x, y, size) => (x + 0.5 < size / 2 ? 1 : 0),
+
+    // 四宫格:左上 + 右下不透明,另外两个透明(棋盘)
+    quad: (x, y, size) => {
+      const left = x + 0.5 < size / 2, top = y + 0.5 < size / 2;
+      return left === top ? 1 : 0;
+    },
+
+    // 4×4 棋盘:一格透明一格不透明
+    checker4: (x, y, size) => {
+      const c = size / 4;
+      const gx = Math.floor((x + 0.5) / c), gy = Math.floor((y + 0.5) / c);
+      return (gx + gy) % 2 === 0 ? 1 : 0;
+    },
+
+    // 4×4 网格线(1px):整片透明、只有格线可见 —— 量缩放最直观
+    grid4: (x, y, size) => {
+      const c = size / 4;
+      const fx = (x + 0.5) % c, fy = (y + 0.5) % c;
+      return (fx < 1 || fy < 1) ? 1 : 0;
+    },
+
+    // 实心方块:居中、边长一半 —— 量圆心最直接
+    box: (x, y, size) => {
+      const m = size / 4;
+      return (x + 0.5 >= m && x + 0.5 < size - m && y + 0.5 >= m && y + 0.5 < size - m) ? 1 : 0;
+    }
+  };
+
+  function renderPattern(makeCanvas, key, opt) {
+    const fn = PATTERN[key];
+    if (!fn) throw new Error('未知图案:' + key);
+    const o = opt || {};
+    const size = Math.max(1, Math.round(+o.size || MASK_SIZE));
+    const out = makeCanvas(size, size);
+    const ctx = out.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+
+    const img = ctx.createImageData(size, size);
+    const d = img.data;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const a = fn(x, y, size);
+        if (a <= 0) continue;
+        const i = (y * size + x) * 4;
+        d[i] = d[i + 1] = d[i + 2] = 255;
+        d[i + 3] = Math.round(255 * a);
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return { canvas: out, size: size, key: key };
+  }
+
+  // 白色 = 该组真正显示的区域(内圆 + 2 环),其余全透明。
+  // 不需要源图:环带只由半径决定,而且转多少度都是同一块,所以 mask 是静态的。
+  // 抗锯齿与贴图共用 coverage,所以 mask 的 alpha 和贴图的 alpha 逐像素一致。
+  function renderMask(makeCanvas, spec, opt) {
+    const o = opt || {};
+    const size = Math.max(1, Math.round(+o.size || MASK_SIZE));
+    const out = makeCanvas(size, size);
+    const ctx = out.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+
+    const bands = bandsOnCanvas(spec);
+    const img = ctx.createImageData(size, size);
+    const d = img.data;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const a = coverage(x, y, size, bands);
+        if (a <= 0) continue;
+        const i = (y * size + x) * 4;
+        d[i] = d[i + 1] = d[i + 2] = 255;   // 全白
+        d[i + 3] = Math.round(255 * a);     // alpha 就是覆盖率
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return { canvas: out, size: size, bands: bands };
   }
 
   // ---------- 角度 ----------
@@ -190,11 +303,17 @@
     REF: REF,
     RING: RING,
     SPRITE: SPRITE,
+    MASK_SIZE: MASK_SIZE,
+    PATTERN: PATTERN,
+    PATTERN_KEYS: ['halves', 'vhalves', 'quad', 'checker4', 'grid4', 'box'],
     sourceRect: sourceRect,
     outputSide: outputSide,
     coverage: coverage,
     applyMask: applyMask,
     renderSprite: renderSprite,
+    renderMask: renderMask,
+    renderPattern: renderPattern,
+    bandsOnCanvas: bandsOnCanvas,
     angleAt: angleAt
   };
 });

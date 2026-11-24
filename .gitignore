@@ -23,6 +23,16 @@ AJPEG/_check.js
 10_scale_img/*.png.tmp
 11_polaroid/_shots/
 11_polaroid/_smoke.log
+07_mi_ebadge/rotate/_e2e/
 smoke-shot.png
 shot-*.png
 __pycache__/
+
+# 12_h264_bw: 下载的 FFmpeg shared 构建 / 编出来的小工具 / 生成的片源与报告
+12_h264_bw/mvtool/ff/
+12_h264_bw/mvtool/ffshared.zip
+12_h264_bw/mvtool/*.exe
+12_h264_bw/mvtool/*.dll
+12_h264_bw/samples/
+12_h264_bw/out/
+12_h264_bw/ref/

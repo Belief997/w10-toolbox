@@ -95,12 +95,115 @@ const PAGE_JS = `(() => {
     out.wide = { size: res.size, rect: res.rect, ...classify(res.canvas.getContext('2d'), res.size, ODD) };
   }
 
+  // --- 与源图同尺寸:画布 455²,贴图 341 居中,四周 57px 留白必须透明 ---
+  {
+    const src = makeSource(455, 455);
+    const res = NS.renderSprite((w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; },
+      src, ODD, { canvas: { w: 455, h: 455 } });
+    const g = res.canvas.getContext('2d');
+    const a = (x, y) => g.getImageData(x, y, 1, 1).data[3];
+    // 数一下贴图那一块之外有没有残留的不透明像素(留边必须整片 alpha=0)
+    const full = g.getImageData(0, 0, 455, 455).data;
+    let padOpaque = 0;
+    for (let y = 0; y < 455; y++) {
+      for (let x = 0; x < 455; x++) {
+        const inside = x >= res.ox && x < res.ox + res.size && y >= res.oy && y < res.oy + res.size;
+        if (!inside && full[(y * 455 + x) * 4 + 3] !== 0) padOpaque++;
+      }
+    }
+    out.sameSize = {
+      size: res.size, w: res.w, h: res.h, ox: res.ox, oy: res.oy,
+      padOpaque: padOpaque,
+      cornerAlpha: a(0, 0), centerAlpha: a(227, 227),
+      ...classify(g, res.size, ODD)
+    };
+    out.sameSizePNG = res.canvas.toDataURL('image/png');
+  }
+
   // --- 外环组:切分必须与 2 环组互补 ---
   {
     const src = makeSource(455, 455);
     const res = NS.renderSprite((w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }, src, EVEN, {});
     out.even = { size: res.size, ...classify(res.canvas.getContext('2d'), res.size, EVEN) };
     out.evenPNG = res.canvas.toDataURL('image/png');
+  }
+
+  // --- Mask:480²,白色 = 内圆 + 2 环,其余透明 ---
+  {
+    const m = NS.renderMask((w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }, ODD, {});
+    const S = m.size;
+    const d = m.canvas.getContext('2d').getImageData(0, 0, S, S).data;
+    const at = (x, y) => { const i = (y * S + x) * 4; return [d[i], d[i + 1], d[i + 2], d[i + 3]]; };
+    const atR = (rNorm, deg) => {
+      const r = rNorm * S, a = deg * Math.PI / 180;
+      return at(Math.floor(S / 2 + r * Math.cos(a)), Math.floor(S / 2 + r * Math.sin(a)));
+    };
+    let white = 0, clear = 0, partial = 0, dirty = 0;
+    for (let i = 0; i < S * S; i++) {
+      const a = d[i * 4 + 3];
+      if (a === 255) white++; else if (a === 0) clear++; else partial++;
+      if (a > 0 && (d[i * 4] !== 255 || d[i * 4 + 1] !== 255 || d[i * 4 + 2] !== 255)) dirty++;
+    }
+    out.mask = {
+      size: S, white, clear, partial, dirty,
+      center: at(S / 2, S / 2), corner: at(1, 1),
+      inner: atR(0.0625, 0), ring2: atR(0.3125, 0),
+      ring3: atR(0.1875, 0), outer: atR(0.4375, 0)
+    };
+    out.maskPNG = m.canvas.toDataURL('image/png');
+
+    // --- 调试图案:六张全出,并逐张量边界 ---
+    out.patterns = {};
+    NS.PATTERN_KEYS.forEach((k) => {
+      const p = NS.renderPattern((w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; },
+        k, { size: NS.MASK_SIZE });
+      const S2 = p.size;
+      const dd = p.canvas.getContext('2d').getImageData(0, 0, S2, S2).data;
+      const al = (x, y) => dd[(y * S2 + x) * 4 + 3];
+      let white = 0, clear = 0, partial = 0, dirty = 0;
+      for (let i = 0; i < S2 * S2; i++) {
+        const a = dd[i * 4 + 3];
+        if (a === 255) white++; else if (a === 0) clear++; else partial++;
+        if (a > 0 && (dd[i * 4] !== 255 || dd[i * 4 + 1] !== 255 || dd[i * 4 + 2] !== 255)) dirty++;
+      }
+      // 上下对半的分界线(white → clear 的第一行)、居中方块的四周留白
+      let splitRow = -1;
+      for (let y = 1; y < S2; y++) if (al(0, y) === 0 && al(0, y - 1) === 255) { splitRow = y; break; }
+      let top = 0, bottom = 0;
+      while (top < S2 && al(S2 / 2, top) === 0) top++;
+      while (bottom < S2 && al(S2 / 2, S2 - 1 - bottom) === 0) bottom++;
+      out.patterns[k] = { size: S2, white, clear, partial, dirty, splitRow, top, bottom };
+      out.patternsPNG = out.patternsPNG || {};
+      out.patternsPNG[k] = p.canvas.toDataURL('image/png');
+    });
+
+    // 六张拼成一张深底联络表 —— 透明在图片查看器里也是白的,不合成根本看不出形状
+    {
+      const keys = NS.PATTERN_KEYS, cols = 3, cell = 240, pad = 6;
+      const rows = Math.ceil(keys.length / cols);
+      const sheet = document.createElement('canvas');
+      sheet.width = cols * cell + (cols + 1) * pad;
+      sheet.height = rows * cell + (rows + 1) * pad;
+      const sx = sheet.getContext('2d');
+      sx.fillStyle = '#1b1d23'; sx.fillRect(0, 0, sheet.width, sheet.height);
+      keys.forEach((k, i) => {
+        const cx = pad + (i % cols) * (cell + pad), cy = pad + Math.floor(i / cols) * (cell + pad);
+        const p = NS.renderPattern((w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }, k, { size: cell });
+        sx.drawImage(p.canvas, cx, cy);
+        sx.fillStyle = 'rgba(255,255,255,.55)';
+        sx.font = '12px monospace';
+        sx.fillText(k, cx + 4, cy + 14);
+      });
+      out.patternSheetPNG = sheet.toDataURL('image/png');
+    }
+
+    // 铺在深色底上做肉眼检查 —— 纯透明区域在图片查看器里也是白的,直接看不出形状
+    const cmp = document.createElement('canvas');
+    cmp.width = cmp.height = S;
+    const cx2 = cmp.getContext('2d');
+    cx2.fillStyle = '#1b1d23'; cx2.fillRect(0, 0, S, S);
+    cx2.drawImage(m.canvas, 0, 0);
+    out.maskPreviewPNG = cmp.toDataURL('image/png');
   }
 
   // --- 旋转后的样子:角度 45° 时圆形遮罩仍然内切方图 ---
@@ -212,15 +315,71 @@ const PAGE_JS = `(() => {
   rep('正方形 455 → 外环+3环', out.even);
   rep('45° 旋转后的 2 环组', out.rotated);
 
+  console.log('\n[Mask] 480² 白色 = 显示区');
+  {
+    const k = out.mask;
+    const fmt = (p) => JSON.stringify(p);
+    console.log(`  尺寸 ${k.size}×${k.size} · 白 ${k.white} · 半透明 ${k.partial} · 透明 ${k.clear}`);
+    console.log(`  圆心 ${fmt(k.center)} · 角落 ${fmt(k.corner)}`);
+    console.log(`  内圆 ${fmt(k.inner)} · 2环 ${fmt(k.ring2)} · 3环 ${fmt(k.ring3)} · 外环 ${fmt(k.outer)}`);
+    const bad = [];
+    if (k.size !== 480) bad.push('尺寸不是 480');
+    if (k.dirty !== 0) bad.push('有非纯白可见像素 ' + k.dirty);
+    if (k.center[3] !== 255) bad.push('圆心不是不透明白');
+    if (k.inner[3] !== 255) bad.push('内圆不是不透明白');
+    if (k.ring2[3] !== 255) bad.push('2 环不是不透明白');
+    if (k.ring3[3] !== 0) bad.push('3 环不是透明');
+    if (k.outer[3] !== 0) bad.push('外环不是透明');
+    if (k.corner[3] !== 0) bad.push('角落不是透明');
+    if (bad.length) { bad.forEach((b) => console.error('  !! ' + b)); process.exitCode = 1; }
+    else console.log('  断言全过 ✓');
+  }
+
+  console.log('\n[图案] 六张调试图案');
+  {
+    const bad = [];
+    const keys = Object.keys(out.patterns);
+    console.log('  共 ' + keys.length + ' 张');
+    keys.forEach((k) => {
+      const p = out.patterns[k];
+      console.log(`  ${k.padEnd(9)} ${p.size}² 白 ${String(p.white).padStart(6)} 透明 ${String(p.clear).padStart(6)}` +
+                  ` 半透明 ${p.partial} 脏色 ${p.dirty}` +
+                  (k === 'halves' ? ` 分界行 ${p.splitRow}` : '') +
+                  (k === 'box' ? ` 上下留白 ${p.top}/${p.bottom}` : ''));
+      if (p.size !== 480) bad.push(k + ' 尺寸不是 480');
+      if (p.dirty !== 0) bad.push(k + ' 有脏色像素 ' + p.dirty);
+      if (p.partial !== 0) bad.push(k + ' 有半透明像素 ' + p.partial);
+      if (k === 'halves' && p.splitRow !== 240) bad.push('halves 分界行应为 240,实际 ' + p.splitRow);
+      if (k === 'box' && (p.top !== 120 || p.bottom !== 120)) bad.push(`box 留白应为 120/120,实际 ${p.top}/${p.bottom}`);
+    });
+    if (keys.length !== 6) bad.push('应有 6 张图案,实际 ' + keys.length);
+    if (bad.length) { bad.forEach((b) => console.error('  !! ' + b)); process.exitCode = 1; }
+    else console.log('  断言全过 ✓');
+  }
+
+  console.log('\n[同尺寸] 455² 源 → 画布 455²');
+  const ss = out.sameSize;
+  console.log(`  画布 ${ss.w}×${ss.h} · 贴图 ${ss.size} · 偏移 ${ss.ox},${ss.oy}`);
+  console.log(`  留白不透明像素 ${ss.padOpaque}(应为 0) · 角落 alpha ${ss.cornerAlpha} · 圆心 alpha ${ss.centerAlpha}`);
+  if (ss.padOpaque !== 0) { console.error('  !! 留边不透明,说明没清干净'); process.exitCode = 1; }
+  if (ss.cornerAlpha !== 0) { console.error('  !! 角落不透明'); process.exitCode = 1; }
+
   console.log('\n[标记] 两组标记都在,且旋转 +45° 后各转 45°、半径不变');
   const m = out.marker;
   const fmt = (o) => o ? `${o.deg.toFixed(1)}° r=${o.r.toFixed(4)} n=${o.n}` : '未见';
   console.log('  正位   红(2环) ' + fmt(m.base.red) + '   绿(内圆) ' + fmt(m.base.green));
   console.log('  +45°   红(2环) ' + fmt(m.rot45.red) + '   绿(内圆) ' + fmt(m.rot45.green));
 
-  for (const k of ['squarePNG', 'evenPNG', 'rotatedPNG', 'markerPNG']) {
+  for (const k of ['squarePNG', 'evenPNG', 'rotatedPNG', 'markerPNG', 'sameSizePNG',
+                   'maskPNG', 'maskPreviewPNG']) {
     const b64 = out[k].split(',')[1];
     fs.writeFileSync(path.join(OUT, k.replace('PNG', '') + '.png'), Buffer.from(b64, 'base64'));
+  }
+  for (const [k, url] of Object.entries(out.patternsPNG)) {
+    fs.writeFileSync(path.join(OUT, 'pattern-' + k + '.png'), Buffer.from(url.split(',')[1], 'base64'));
+  }
+  if (out.patternSheetPNG) {
+    fs.writeFileSync(path.join(OUT, 'pattern-sheet.png'), Buffer.from(out.patternSheetPNG.split(',')[1], 'base64'));
   }
   console.log('\n图已写入', OUT);
 
@@ -258,24 +417,74 @@ const PAGE_JS = `(() => {
             new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
           setTimeout(() => {
             const cv = document.getElementById('cropCv');
-            const g = cv.getContext('2d');
-            const mid = g.getImageData(Math.round(cv.width * 0.4), Math.round(cv.height / 2), 1, 1).data;
-            resolve({
-              cardsHidden: document.getElementById('cards').hidden,
-              emptyHidden: document.getElementById('empty').hidden,
-              cropSize: cv.width,
-              srcSize: document.getElementById('srcCv').width,
-              evenSize: document.getElementById('evenCv').width,
-              imgName: document.getElementById('imgName').textContent,
-              cropChip: document.getElementById('cropChip').textContent,
-              evenChip: document.getElementById('evenChip').textContent,
-              geo: document.getElementById('geo').textContent,
-              saveEnabled: !document.getElementById('saveBtn').disabled,
-              ringNote: document.getElementById('ringNote').textContent,
-              center: Array.from(g.getImageData(cv.width / 2, cv.height / 2, 1, 1).data),
-              ring2: Array.from(mid),
-              corner: Array.from(g.getImageData(1, 1, 1, 1).data)
-            });
+            const snap = () => {
+              const g = cv.getContext('2d');
+              return {
+                cropSize: cv.width,
+                cropChip: document.getElementById('cropChip').textContent,
+                cropNote: document.getElementById('cropNote').textContent,
+                scaleVal: document.getElementById('scaleVal').textContent,
+                center: Array.from(g.getImageData(cv.width / 2, cv.height / 2, 1, 1).data),
+                corner: Array.from(g.getImageData(1, 1, 1, 1).data)
+              };
+            };
+            const crop = snap();
+            // 切成「与源图同尺寸」:400² 源图,贴图 300,预览 300 宽、留白 50/边
+            const fit = document.getElementById('fit');
+            fit.value = 'source';
+            fit.dispatchEvent(new Event('change'));
+            setTimeout(() => {
+              const same = snap();
+              // mask 面板:预览尺寸 + 导出是否可用
+              const mcv = document.getElementById('maskCv');
+              const mg = mcv.getContext('2d');
+              const maskInfo = {
+                css: mcv.width,
+                chip: document.getElementById('maskChip').textContent,
+                note: document.getElementById('maskNote').textContent.replace(/<[^>]+>/g, ''),
+                center: Array.from(mg.getImageData(mcv.width / 2, mcv.height / 2, 1, 1).data),
+                corner: Array.from(mg.getImageData(1, 1, 1, 1).data),
+                buttons: ['maskBtn', 'maskCopyBtn', 'maskEvenBtn']
+                  .map((id) => id + '=' + (document.getElementById(id).disabled ? 'disabled' : 'on')).join(' ')
+              };
+              // 真的点一下导出,验下载文件名是 480 且 PNG 尺寸正确。
+              // 用记录对象而不是字符串数组 —— 解码是异步的,后面还能补写尺寸。
+              window.__dl = [];
+              const origClick = HTMLAnchorElement.prototype.click;
+              HTMLAnchorElement.prototype.click = function () {
+                if (this.download) {
+                  const rec = { name: this.download, w: 0, h: 0 };
+                  window.__dl.push(rec);
+                  // 顺着 blob URL 把图读回来量尺寸
+                  const im = new Image();
+                  im.onload = () => { rec.w = im.naturalWidth; rec.h = im.naturalHeight; };
+                  im.onerror = () => { rec.w = rec.h = -1; };
+                  im.src = this.href;
+                  return;
+                }
+                return origClick.apply(this, arguments);
+              };
+              document.getElementById('maskBtn').click();
+              document.getElementById('maskEvenBtn').click();
+              setTimeout(() => {
+                HTMLAnchorElement.prototype.click = origClick;
+                resolve({
+                  cardsHidden: document.getElementById('cards').hidden,
+                  emptyHidden: document.getElementById('empty').hidden,
+                  srcSize: document.getElementById('srcCv').width,
+                  evenSize: document.getElementById('evenCv').width,
+                  imgName: document.getElementById('imgName').textContent,
+                  evenChip: document.getElementById('evenChip').textContent,
+                  geo: document.getElementById('geo').textContent,
+                  saveEnabled: !document.getElementById('saveBtn').disabled,
+                  ringNote: document.getElementById('ringNote').textContent,
+                  crop: crop,
+                  same: same,
+                  mask: maskInfo,
+                  downloads: window.__dl
+                });
+              }, 600);
+            }, 400);
           }, 500);
         }, 'image/png');
       });
@@ -286,11 +495,32 @@ const PAGE_JS = `(() => {
     console.log('\n[页面] 模拟拖入 400×400 四环图');
     if (v) {
       console.log('  cards 显示 ' + !v.cardsHidden + ' · empty 隐藏 ' + v.emptyHidden);
-      console.log('  ' + v.imgName + ' · ' + v.cropChip + ' · ' + v.evenChip + ' · 导出可用 ' + v.saveEnabled);
-      console.log('  画布 crop ' + v.cropSize + ' · src ' + v.srcSize + ' · even ' + v.evenSize);
-      console.log('  圆心像素(内圆)' + JSON.stringify(v.center) + ' · 2环 ' + JSON.stringify(v.ring2) + ' · 角落 ' + JSON.stringify(v.corner));
+      console.log('  ' + v.imgName + ' · 导出可用 ' + v.saveEnabled + ' · ' + v.evenChip);
+      console.log('  src 画布 ' + v.srcSize + ' · even 画布 ' + v.evenSize);
+      console.log('  [贴紧] ' + v.crop.cropChip + ' · scale ' + v.crop.scaleVal +
+                  ' · 圆心 ' + JSON.stringify(v.crop.center) + ' · 角落 ' + JSON.stringify(v.crop.corner));
+      console.log('          ' + v.crop.cropNote.replace(/<[^>]+>/g, ''));
+      console.log('  [同尺寸] ' + v.same.cropChip + ' · 圆心 ' + JSON.stringify(v.same.center) +
+                  ' · 角落 ' + JSON.stringify(v.same.corner));
+      console.log('          ' + v.same.cropNote.replace(/<[^>]+>/g, ''));
       console.log('  geo: ' + v.geo.replace(/\s+/g, ' '));
       console.log('  ringNote: ' + v.ringNote);
+      console.log('  [Mask] 预览画布 ' + v.mask.css + ' ' + v.mask.chip +
+                  ' · 圆心 ' + JSON.stringify(v.mask.center) + ' · 角落 ' + JSON.stringify(v.mask.corner));
+      console.log('         按钮 ' + v.mask.buttons);
+      console.log('         ' + v.mask.note);
+      const dl = v.downloads || [];
+      console.log('  下载 ' + dl.length + ' 个:' + (dl.length
+        ? '\n           ' + dl.map((d) => `${d.name} | ${d.w}x${d.h}`).join('\n           ') : ' (无)'));
+      const bad = [];
+      if (!/^maskBtn=on/.test(v.mask.buttons)) bad.push('导出按钮仍禁用');
+      if (dl.length !== 2) bad.push('期望 2 次下载,实际 ' + dl.length);
+      dl.forEach((d) => {
+        if (d.w !== 480 || d.h !== 480) bad.push(`导出尺寸不是 480²: ${d.name} → ${d.w}x${d.h}`);
+        if (!/rotate-mask-(odd|even)-480px-/.test(d.name)) bad.push('文件名不合规: ' + d.name);
+      });
+      if (bad.length) { bad.forEach((b) => console.error('  !! ' + b)); process.exitCode = 1; }
+      else console.log('  mask 按钮与导出断言全过 ✓');
     } else {
       console.log('  !! 没有返回值');
     }

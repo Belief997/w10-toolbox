@@ -97,6 +97,13 @@
   button.ghost.main:hover { filter: brightness(1.06); }
   .half { display: flex; gap: 8px; }
   .half button.ghost { margin-top: 8px; }
+  .link {
+    display: block; width: 100%; margin-top: 10px; padding: 0; font-size: 12px;
+    border: 0; background: none; color: #ff8fa3; cursor: pointer; text-align: left;
+    text-decoration: underline; text-underline-offset: 3px;
+  }
+  .link:hover { color: #ff4d6d; }
+  .link:disabled { opacity: .35; cursor: not-allowed; text-decoration: none; }
 
   .imgname {
     margin-top: 8px; font-size: 10px; opacity: .45; text-align: center;
@@ -144,6 +151,12 @@
         <div class="checker"><canvas id="evenCv"></canvas></div>
         <p class="note">同一条管线、另一组环带 —— 用来核对切分是否干净:两组的亮区必须互补,拼回去等于原图。</p>
       </div>
+
+      <div class="card">
+        <h3>Mask · <b>内圆 + 2 环</b> <span id="maskChip"></span></h3>
+        <div class="checker"><canvas id="maskCv"></canvas></div>
+        <p class="note" id="maskNote"></p>
+      </div>
     </div>
   </div>
 
@@ -163,6 +176,13 @@
 
     <div class="group">
       <div class="gt">输出尺寸</div>
+      <div class="row">
+        <label>基准</label>
+        <select id="fit">
+          <option value="crop" selected>贴紧 2 环(0.75×短边)</option>
+          <option value="source">与源图同尺寸</option>
+        </select>
+      </div>
       <div class="row">
         <label>倍数</label>
         <select id="scale">
@@ -185,16 +205,43 @@
     </div>
 
     <div class="group">
+      <div class="gt">Mask</div>
+      <button class="ghost" id="maskBtn" disabled>导出 Mask PNG · 480²</button>
+      <button class="link" id="maskCopyBtn" disabled>复制 Mask 到剪贴板</button>
+      <button class="link" id="maskEvenBtn" disabled>导出「外环 + 3 环」Mask</button>
+    </div>
+
+    <div class="group">
+      <div class="gt">调试图案 · 480²</div>
+      <div class="row">
+        <label>图案</label>
+        <select id="patSel">
+          <option value="halves" selected>上下对半</option>
+          <option value="vhalves">左右对半</option>
+          <option value="quad">四宫格棋盘</option>
+          <option value="checker4">4×4 棋盘</option>
+          <option value="grid4">4×4 网格线(1px)</option>
+          <option value="box">居中方块(边长 1/2)</option>
+        </select>
+      </div>
+      <button class="ghost" id="patBtn" disabled>导出图案 PNG · 480²</button>
+      <button class="link" id="patAllBtn" disabled>一次导出全部 6 个</button>
+      <p class="note" id="patNote" style="margin:8px 0 0;font-size:11px;opacity:.45;line-height:1.7"></p>
+    </div>
+
+    <div class="group">
       <div class="gt">几何(466 基准)</div>
       <div class="imgname" id="geo" style="text-align:left;line-height:1.9;opacity:.55"></div>
     </div>
 
     <div class="hint">
       · 内圆 <code>0.125</code>、2 环 <code>0.25…0.375</code>,两者角度都是 <code>90°→0°</code>;外环 <code>-90°→0°</code>、3 环 <code>-90°→0°</code>,所以能同转的只有「2 环 + 内圆」。<br>
-      · 输出边长 = 2 环外接正方形 = <code>0.75 × 短边</code>。圆绕固定圆心转,任何角度都内切这个正方形,所以不留边距 —— 留了比例就和 466 基准对不上。<br>
+      · 贴图边长 = 2 环外接正方形 = <code>0.75 × 短边</code>。圆绕固定圆心转,任何角度都内切这个正方形,所以贴图自己不留边距。<br>
+      · <b>基准 =「与源图同尺寸」</b>时输出画布 = 原图像素,贴图仍按 0.75 居中放进去,四周那圈是<b>透明留白</b>。设备把整张贴图拉伸填满 466,贴图占 0.75 才能让 2 环落回 349.5 —— 把贴图拉满画布反而会把 2 环推到 <code>0.5</code>。<br>
       · 取景与预览一致:<b>先按短边居中裁成正方形</b>,再取其中以圆心为中心的那 0.75。<br>
       · 导出是<b>透明 PNG</b>:3 环位置全透明,设备按黑底铺时不会漏出另一组的画面。<br>
-      · 想把这组贴图叠回原图检查,可以拿「外环 + 3 环」那张当另一层。
+      · 想把这组贴图叠回原图检查,可以拿「外环 + 3 环」那张当另一层。<br>
+      · <b>Mask</b> 是纯几何、不依赖源图:480² 画布上白色 = 该组真正显示的区域(内圆 + 2 环),3 环缝隙与圆外全透明。它和贴图的 alpha 用同一套覆盖率,所以逐像素对齐。
     </div>
   </aside>
 
@@ -210,12 +257,15 @@
     img: null,        // 当前图片(Image 或 ImageBitmap)
     name: '',
     out: null,        // 最近一次 renderSprite 的结果
+    fit: 'crop',      // 'crop' = 贴紧 2 环 | 'source' = 画布与源图同尺寸
     scale: 1,
     bgMode: 'alpha',
     bgColor: '#000000',
     srcCss: 360,
     cropCss: 300,
-    evenCss: 200
+    evenCss: 200,
+    maskCss: 200,
+    masks: null       // { odd, even } 预览用的两套 borderRadius 结果
   };
 
   // ---------- 几何读数 ----------
@@ -224,7 +274,7 @@
   const K = RC.RING;
   const px = (r) => (r * RC.REF).toFixed(1) + 'px';   // r 以 466 基准的边长归一化
 
-  // 保留环带归一化到「贴图边长」,换算回 466 基准的半径
+  // 保留环带相对贴图边长的比例,乘 0.75 换算回「源图短边」的比例,再乘 466 得基准像素
   const kept = ODD.bands.map((b) => [b[0] * ODD.side, b[1] * ODD.side]);
 
   function geoText() {
@@ -239,12 +289,20 @@
   $('geo').innerHTML = geoText();
 
   // ---------- 主流程 ----------
+  function mkCanvas(w, h) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    return c;
+  }
+
   function render() {
     if (!ui.img) return;
     const iw = ui.img.naturalWidth || ui.img.width;
     const ih = ui.img.naturalHeight || ui.img.height;
 
     // --- 输出图 ---
+    // 贴图边长永远 = 0.75 × 短边 × 倍数;「与源图同尺寸」只改画布,不改贴图 ——
+    // 设备把整张图拉伸填满 466,贴图占 0.75 才能让 2 环落回 349.5。
     const baseSide = RC.outputSide(iw, ih, ODD.side);
     const size = Math.max(1, Math.round(baseSide * ui.scale));
     const res = RC.renderSprite((w, h) => {
@@ -253,16 +311,22 @@
       return c;
     }, ui.img, ODD, {
       size: size,
+      canvas: ui.fit === 'source'
+        ? { w: Math.max(size, Math.round(iw * ui.scale)), h: Math.max(size, Math.round(ih * ui.scale)) }
+        : null,
       background: ui.bgMode === 'solid' ? ui.bgColor : null
     });
     ui.out = res;
 
     // --- 输出预览 ---
+    // 画布可能不是正方形(源图不是),预览按自己的宽高比走,否则图会被拉变形
     const cropCv = $('cropCv');
-    const css = ui.cropCss;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    cropCv.width = Math.round(css * dpr); cropCv.height = Math.round(css * dpr);
-    cropCv.style.width = css + 'px'; cropCv.style.height = css + 'px';
+    const pScale = ui.cropCss / Math.max(res.w, res.h);
+    const pw = Math.max(1, Math.round(res.w * pScale));
+    const ph = Math.max(1, Math.round(res.h * pScale));
+    cropCv.width = Math.round(pw * dpr); cropCv.height = Math.round(ph * dpr);
+    cropCv.style.width = pw + 'px'; cropCv.style.height = ph + 'px';
     const cctx = cropCv.getContext('2d');
     cctx.clearRect(0, 0, cropCv.width, cropCv.height);
     if ('imageSmoothingQuality' in cctx) cctx.imageSmoothingQuality = 'high';
@@ -292,6 +356,18 @@
     ectx.clearRect(0, 0, evenCss, evenCss);
     ectx.drawImage(evenRes.canvas, 0, 0, evenCss, evenCss);
 
+    // --- Mask:纯几何,与源图无关,所以只算一次;按预览尺寸重渲染保证屏上不糊 ---
+    ui.masks = {
+      odd: RC.renderMask(mkCanvas, ODD, { size: ui.maskCss }),
+      even: RC.renderMask(mkCanvas, RC.SPRITE.even, { size: ui.maskCss })
+    };
+    const maskCv = $('maskCv');
+    maskCv.width = ui.maskCss; maskCv.height = ui.maskCss;
+    maskCv.style.width = ui.maskCss + 'px'; maskCv.style.height = ui.maskCss + 'px';
+    const mctx = maskCv.getContext('2d');
+    mctx.clearRect(0, 0, ui.maskCss, ui.maskCss);
+    mctx.drawImage(ui.masks.odd.canvas, 0, 0);
+
     // --- 读数 ---
     $('scaleVal').textContent = `${baseSide}→${size}`;
     $('srcChip').textContent = `· ${iw}×${ih}`;
@@ -305,11 +381,21 @@
     const d = Math.round(s * ODD.side);
     mark.style.width = mark.style.height = d + 'px';
     mark.style.left = mark.style.top = Math.round((s - d) / 2) + 'px';
-    $('cropChip').textContent = `· ${size}×${size}`;
+
+    const pad = res.w !== size || res.h !== size
+      ? `;画布 ${iw}×${ih} × ${ui.scale},贴图 ${size}×${size} 居中,四周透明留白 ` +
+        `${Math.round((res.w - size) / 2)} / ${Math.round((res.h - size) / 2)} px`
+      : '';
+    $('cropChip').textContent = `· ${res.w}×${res.h}`;
     $('cropNote').innerHTML =
       `半径 ${px(kept[0][1])} 内圆 + ${px(kept[1][0])}…${px(kept[1][1])} 环带` +
-      `(466 基准);圆外与 3 环位置全透明。`;
+      `(466 基准),贴图 ${size}×${size};圆外与 3 环位置全透明` + pad + '。';
     $('evenChip').textContent = `· ${evenCss}×${evenCss}`;
+    $('maskChip').textContent = `· ${RC.MASK_SIZE}×${RC.MASK_SIZE}`;
+    // 半径从 RC.RING 推,面板不写第二份常量
+    $('maskNote').innerHTML =
+      `白色 = 内圆(<b>${K.inner}</b> 半径)+ 2 环(<b>${K.ring3}…${K.ring2}</b>)的显示区,` +
+      `3 环缝隙与外圈全透明。与源图无关、也与旋转角度无关 —— 圆转多少度遮罩都是同一块。`;
 
     drawRing(0);
   }
@@ -332,11 +418,13 @@
     if (!ui.out) return;
     const sec = ms / 1000;
     const ang = RC.angleAt(ODD, sec);
+    // 只取贴图那一块来转:画布上的留边不参与旋转,否则会转出一圈半透明方框
     ctx.save();
     ctx.translate(css / 2, css / 2);
     ctx.rotate(ang);
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(ui.out.canvas, -css / 2, -css / 2, css, css);
+    ctx.drawImage(ui.out.canvas, ui.out.ox, ui.out.oy, ui.out.size, ui.out.size,
+                  -css / 2, -css / 2, css, css);
     ctx.restore();
 
     const deg = Math.round(ang * 180 / Math.PI);
@@ -370,6 +458,11 @@
     $('imgName').textContent = ui.name;
     $('saveBtn').disabled = false;
     $('copyBtn').disabled = false;
+    $('maskBtn').disabled = false;
+    $('maskCopyBtn').disabled = false;
+    $('maskEvenBtn').disabled = false;
+    $('patBtn').disabled = false;
+    $('patAllBtn').disabled = false;
     const iw = ui.img.naturalWidth || ui.img.width;
     const ih = ui.img.naturalHeight || ui.img.height;
     // 源图预览显示「裁方后的整块」,和输出图同尺度便于看出被抠掉的是哪一圈
@@ -387,17 +480,61 @@
   }
   function saveName() {
     const base = (ui.name || 'image').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_');
-    return `${base}-rotate-inner-ring2-${ui.out ? ui.out.size : 0}px-${stamp()}.png`;
+    const dim = ui.out ? `${ui.out.w}x${ui.out.h}` : '0x0';
+    return `${base}-rotate-inner-ring2-${dim}-${stamp()}.png`;
   }
   function download() {
     if (!ui.out) return;
-    ui.out.canvas.toBlob((blob) => {
+    saveCanvas(ui.out.canvas, saveName());
+  }
+
+  function saveCanvas(canvas, name) {
+    canvas.toBlob((blob) => {
       if (!blob) return;
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = saveName();
+      a.download = name;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, 'image/png');
+  }
+
+  // ----- Mask -----
+  // 导出走 MASK_SIZE(480²),不跟面板倍数走 —— mask 是给下游当遮罩用的固定尺寸。
+  function maskName(spec) {
+    const base = (ui.name || 'image').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_');
+    return `${base}-rotate-mask-${spec.key}-${RC.MASK_SIZE}px-${stamp()}.png`;
+  }
+  function exportMask(spec) {
+    const m = RC.renderMask(mkCanvas, spec, { size: RC.MASK_SIZE });
+    saveCanvas(m.canvas, maskName(spec));
+  }
+  // ----- 调试图案 -----
+  // 这些图案不依赖源图,是用来在设备上反推「466 内容贴在 480 的哪里」的标尺:
+  // 半透看边界落在哪一行/列,方格看缩放有没有被拉伸,方块看圆心。
+  const PAT_LABEL = {
+    halves: '上下对半',
+    vhalves: '左右对半',
+    quad: '四宫格棋盘',
+    checker4: '4×4 棋盘',
+    grid4: '4×4 网格线',
+    box: '居中方块'
+  };
+  function patternName(key) {
+    return `debug-${key}-${RC.MASK_SIZE}px-${stamp()}.png`;
+  }
+  function exportPattern(key) {
+    const p = RC.renderPattern(mkCanvas, key, { size: RC.MASK_SIZE });
+    saveCanvas(p.canvas, patternName(key));
+  }
+  function copyMask(spec) {
+    if (!navigator.clipboard || !window.ClipboardItem) { alert('当前浏览器不支持把图片写进剪贴板'); return; }
+    const m = RC.renderMask(mkCanvas, spec, { size: RC.MASK_SIZE });
+    m.canvas.toBlob((blob) => {
+      if (!blob) return;
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        .then(() => flash($('maskCopyBtn'), '已复制'))
+        .catch(() => alert('复制失败(可能需要页面处于焦点)'));
     }, 'image/png');
   }
   function copyToClipboard() {
@@ -422,6 +559,32 @@
   $('saveBtn').addEventListener('click', download);
   $('copyBtn').addEventListener('click', copyToClipboard);
 
+  // mask 与源图无关,但仍然跟着载图一起解锁 —— 面板上不出现「还没图却可导出」的状态
+  $('maskBtn').addEventListener('click', () => exportMask(ODD));
+  $('maskCopyBtn').addEventListener('click', () => copyMask(ODD));
+  $('maskEvenBtn').addEventListener('click', () => exportMask(RC.SPRITE.even));
+
+  // 调试图案
+  const patHints = {
+    halves: '上半不透明、下半透明,分界线固定在第 240 行。设备上量一下分界落在哪一行,纵向偏移直接就出来了。',
+    vhalves: '左半不透明、右半透明,分界线在第 240 列。量横向偏移用。',
+    quad: '左上 + 右下不透明,另两格透明。偏移和缩放一起看:格子边界偏了就说明贴放位置不对。',
+    checker4: '4×4 一格一换,每格 120px。缩放被拉伸时格子尺寸会不等宽。',
+    grid4: '整片透明、只有 1px 格线可见(每 120px 一条)。量缩放最直观 —— 格线间距对不上就是被缩放过。',
+    box: '居中方块,边长 240、四周各留 120。量圆心最直接:四边到画布边界的距离必须都是 120。'
+  };
+  function patNoteText() {
+    return patHints[$('patSel').value] || '';
+  }
+  $('patSel').addEventListener('change', () => { $('patNote').textContent = patNoteText(); });
+  $('patNote').textContent = patNoteText();
+  $('patBtn').addEventListener('click', () => exportPattern($('patSel').value));
+  $('patAllBtn').addEventListener('click', () => {
+    // 依次导出,错开一点让浏览器不把后一次下载当成重复请求
+    RC.PATTERN_KEYS.forEach((k, i) => setTimeout(() => exportPattern(k), i * 250));
+  });
+
+  $('fit').addEventListener('change', (e) => { ui.fit = e.target.value; render(); });
   $('scale').addEventListener('change', (e) => { ui.scale = +e.target.value; render(); });
   $('bgMode').addEventListener('change', (e) => { ui.bgMode = e.target.value; render(); });
   $('bgColor').addEventListener('input', (e) => { ui.bgColor = e.target.value; render(); });
