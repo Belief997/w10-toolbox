@@ -109,6 +109,80 @@ function openUrl(url) {
   if (/^https?:\/\//i.test(String(url || ''))) shell.openExternal(url);
 }
 
+// ---- 控制台日志下载 ------------------------------------------------------
+// 两个入口共用这一套：卡片上的「下载日志」按钮，和 --download-console=<job>/<构建号>
+// 命令行（自检用，跑完就退）。地址一律由配置里的 Jenkins 地址拼出来，
+// 调用方只能给 job 名和构建号 —— 不给任意 URL 开门。
+
+// 目录：设置里填了就用它（相对路径按程序目录解析），没填就程序目录下的 build_log
+function resolveLogDir() {
+  const configured = String(store.get().jenkins?.logDir || '').trim();
+  const programDir = path.dirname(store.dataDir());
+  return configured ? path.resolve(programDir, configured) : path.join(programDir, 'build_log');
+}
+
+function consoleDestFile(job, number) {
+  const safe = String(job).replace(/[\\/:*?"<>|]/g, '_').replace(/~/g, '_');
+  return path.join(resolveLogDir(), `${safe}-${number}-console.txt`);
+}
+
+// 同一个构建点两次只下一次（按钮是可靠点击，但没有进度条，容易被连点）
+const logDownloads = new Set();
+
+async function downloadBuildLog(cell) {
+  if (!cell?.job || !cell?.number) return { ok: false, error: '这个构建还没有构建号' };
+  const key = `${cell.job}#${cell.number}`;
+  // busy 让卡片知道"已经在下了"，别显示成失败
+  if (logDownloads.has(key)) return { ok: false, busy: true, error: '正在下载' };
+  if (!jenkinsClient) return { ok: false, error: '还没配置 Jenkins' };
+  logDownloads.add(key);
+  try {
+    const destFile = consoleDestFile(cell.job, cell.number);
+    logger.info(`[console] 下载 ${key} → ${destFile}`);
+    const result = await jenkinsClient.downloadConsole({
+      job: cell.job, number: cell.number, destFile
+    });
+    logger.info(`[console] 完成 ${key} ${result.bytes} 字节 / ${result.ms}ms`);
+    notifyLogSaved(result);
+    return { ok: true, ...result };
+  } catch (error) {
+    logger.warn(`[console] 失败 ${key}：${error.message}`);
+    return { ok: false, error: error.message };
+  } finally {
+    logDownloads.delete(key);
+  }
+}
+
+// 下完不弹资源管理器（会打断手头的事），用/不点它都不碍事的那种提示
+function notifyLogSaved(result) {
+  if (!Notification.isSupported()) return;
+  const name = path.basename(result.file);
+  const kb = `${Math.round(result.bytes / 1024)}KB`;
+  const notification = new Notification({
+    title: '构建日志已保存',
+    body: `${name}（${kb}）· 点击打开所在文件夹`
+  });
+  notification.on('click', () => shell.showItemInFolder(result.file));
+  notification.show();
+}
+
+// 命令行入口：只下日志，跑完就退
+async function runConsoleDownload(job, number) {
+  const config = store.get();
+  const jenkins = config.jenkins || {};
+  if (!jenkins.url) return { ok: false, error: '还没填 Jenkins 地址' };
+  if (!job || !/^\d+$/.test(number)) return { ok: false, error: '用法：--download-console=<job>/<构建号>' };
+  const oneOffClient = createJenkinsClient({
+    baseUrl: jenkins.url,
+    username: jenkins.username,
+    token: config.jenkinsToken
+  });
+  const destFile = consoleDestFile(job, number);
+  const result = await oneOffClient.downloadConsole({ job, number, destFile });
+  console.log(`[console] ${result.url} → ${result.file}（${result.bytes} 字节，${result.ms}ms）`);
+  return { ok: true, ...result };
+}
+
 function handleCells(cells, result = {}) {
   const events = diffCells(lastCells, cells);
   lastCells = cells;
@@ -182,6 +256,16 @@ function buildDock(previewPatch = null) {
     onOpenUrl: openUrl,
     onManualRefresh: () => poller?.pollNow(),
     onOpenSettings: openSettings,
+    // 卡片上的「下载日志」：下完把结果推回卡片（按钮要从"下载中"变回可点）
+    onDownloadLog: async (cellId) => {
+      const cell = lastCells.find((item) => item.id === cellId);
+      if (!cell || cell.kind !== 'build') return;
+      const result = await downloadBuildLog(cell);
+      dock?.pushLogState({
+        cellId, ok: result.ok, busy: result.busy === true,
+        file: result.file || '', error: result.error || ''
+      });
+    },
     onPlacementChange: ({ position }) => {
       if (!position) return;
       store.save({ position });
@@ -255,6 +339,8 @@ function registerSettingsIpc() {
     return {
       config: safe,
       configPath: store.configPath(),
+      // 设置页拿它当"留空时日志会存到哪"的提示
+      logDir: resolveLogDir(),
       hasPassword: Boolean(password),
       hasJenkinsToken: Boolean(jenkinsToken),
       demo: DEMO,
@@ -334,6 +420,18 @@ function registerSettingsIpc() {
     } catch (error) {
       return { ok: false, transport: probe.kind, error: error.message };
     }
+  });
+
+  // 「选择…」日志下载目录：只取路径，不建目录（第一次下载时才建）
+  ipcMain.handle('settings:pickDir', async () => {
+    const owner = settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : undefined;
+    const result = await dialog.showOpenDialog(owner, {
+      title: '选择日志下载目录',
+      defaultPath: resolveLogDir(),
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (result.canceled || !result.filePaths?.length) return { ok: false, canceled: true };
+    return { ok: true, path: result.filePaths[0] };
   });
 
   // 导出：凭据一律不进文件
@@ -529,6 +627,28 @@ if (LOCKED && !app.requestSingleInstanceLock()) {
 
     logger = createLogger(path.join(store.dataDir(), 'app.log'));
     store.setLogger(logger);
+
+    // 自检用：只下日志，别的东西一概不装配
+    const consoleArg = process.argv.find((arg) => arg.startsWith('--download-console='));
+    if (consoleArg) {
+      const spec = consoleArg.slice('--download-console='.length);
+      const cut = spec.lastIndexOf('/');
+      const job = cut > 0 ? spec.slice(0, cut) : '';
+      const number = cut > 0 ? spec.slice(cut + 1) : '';
+      logger.info(`[console] 开始 ${job} #${number}`);
+      runConsoleDownload(job, number)
+        .then((result) => {
+          if (!result.ok) logger.warn(`[console] 失败：${result.error}`);
+          app.exit(result.ok ? 0 : 1);
+        })
+        .catch((error) => {
+          logger.warn(`[console] 失败：${error.message}`);
+          console.error(`[console] 失败：${error.message}`);
+          app.exit(1);
+        });
+      return;
+    }
+
     backdrop = createBackdrop({ app, screen, logger });
     logger.info(`start demo=${DEMO} pid=${process.pid} log=${logger.file}`);
     registerSettingsIpc();
@@ -540,6 +660,40 @@ if (LOCKED && !app.requestSingleInstanceLock()) {
     restartPipeline();
     buildTray();
     globalShortcut.register('Control+Alt+D', () => diagnose());
+
+    // 自检用：--log-smoke 把 build 那张卡片摆出来，真点「下载日志」，
+    // 再把按钮上的字读回来。验证的是整条链路：渲染层 click → preload → IPC →
+    // 主进程下载 → 结果推回卡片。跑完退出，不等用户操作。
+    if (process.argv.includes('--log-smoke')) {
+      setTimeout(async () => {
+        try {
+          if (!lastCells.some((cell) => cell.kind === 'build')) {
+            logger.warn('[log-smoke] 没有 build 格子（没配 Jenkins，或者第一轮还没拉到）');
+            app.exit(1);
+            return;
+          }
+          const before = await dock.debugCard('build');
+          logger.info(`[log-smoke] 点击前 ${JSON.stringify(before.buttons)}`);
+          await dock.debugCard('build', '下载日志');
+          // 等结果：按钮从"下载中…"变成"已保存"/"下载失败"
+          for (let i = 0; i < 60; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            const now = await dock.debugCard('build');
+            const settled = (now.buttons || []).find((button) => button.text === '已保存' || button.text === '下载失败');
+            if (settled) {
+              logger.info(`[log-smoke] 结果 ${JSON.stringify(now.buttons)}`);
+              app.exit(0);
+              return;
+            }
+          }
+          logger.warn('[log-smoke] 30 秒内没等到结果');
+          app.exit(1);
+        } catch (error) {
+          logger.warn(`[log-smoke] 失败：${error.message}`);
+          app.exit(1);
+        }
+      }, 8000);
+    }
 
     // 自检用：--preview-smoke 会在 8 秒后把不透明度预览到 5%，用来验证
     // "预览 → 渲染层" 这条链路本身通不通（绕过设置窗的 UI）。

@@ -183,6 +183,17 @@
           <textarea id="jkJobs" rows="5" spellcheck="false"
             placeholder="ReleaseBuild~Demo~boardX~Arbitrary"></textarea>
         </label>
+        <div class="field">
+          <span>控制台日志下载目录</span>
+          <div class="row">
+            <input id="jkLogDir" type="text" spellcheck="false" placeholder="" />
+            <button id="jkLogDirPick" class="ghost" type="button">选择…</button>
+          </div>
+        </div>
+        <p class="hint">
+          留空 = 程序目录下的 <code>build_log</code>（第一次下载时自动创建）。
+          文件名是 <code>job名-构建号-console.txt</code>，同一轮重复下载会覆盖。
+        </p>
         <div class="row">
           <button id="testJenkins" class="ghost">测试连接</button>
           <span id="jkResult" class="result"></span>

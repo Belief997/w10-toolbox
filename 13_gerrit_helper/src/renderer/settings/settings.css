@@ -185,6 +185,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 }
 
 .row { display: flex; align-items: center; gap: 10px; }
+/* 「输入框 + 选择…按钮」：输入框吃掉剩余宽度，按钮不被压扁 */
+.row > input[type="text"] { flex: 1; min-width: 0; }
+.row > button { flex: 0 0 auto; }
 
 .checks { display: flex; flex-direction: column; gap: 10px; }
 .checks label, .check {

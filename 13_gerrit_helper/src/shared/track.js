@@ -24,8 +24,8 @@ const DEFAULTS = Object.freeze({
   recentDays: 14,
   // 设置窗自身的不透明度（0-100），和悬浮层分开调
   settingsAlpha: 92,
-  // Jenkins 构建监控（可选）
-  jenkins: { url: '', username: '', jobs: [] },
+  // Jenkins 构建监控（可选）；logDir 留空 = 程序目录下的 build_log
+  jenkins: { url: '', username: '', jobs: [], logDir: '' },
   // basic = HTTP password；gitcookies = 复用 ~/.gitcookies 的 SSO 会话；none = 匿名
   authMode: 'basic',
   // auto = 本机有 ssh 就走 SSH，否则回落 REST；ssh = 只用 SSH；rest = 只用 HTTP
@@ -72,7 +72,9 @@ function normalize(config) {
     username: String(jenkins.username || '').trim(),
     // 一行一个 job 路径；folder 用 / 分隔
     jobs: (Array.isArray(jenkins.jobs) ? jenkins.jobs : [])
-      .map((job) => String(job).trim()).filter(Boolean)
+      .map((job) => String(job).trim()).filter(Boolean),
+    // 控制台日志下载目录；空串 = 程序目录下的 build_log（见 main/index.js）
+    logDir: String(jenkins.logDir || '').trim()
   };
   // 旧版本的位置字段，读到时顺手清掉（位置改由 position + snap 表达）
   delete next.offset;

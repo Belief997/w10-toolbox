@@ -163,6 +163,16 @@ test('跟踪行能区分 change 和查询', () => {
   assert.strictEqual(parseTrackLine('# 注释'), null);
 });
 
+test('jenkins.logDir 默认空串（= 程序目录下的 build_log），原样保留用户填的路径', () => {
+  assert.strictEqual(normalize({}).jenkins.logDir, '', '默认留空');
+  assert.strictEqual(
+    normalize({ jenkins: { url: 'x', logDir: '  D:\\logs  ' } }).jenkins.logDir,
+    'D:\\logs', '去掉首尾空白'
+  );
+  // 旧配置没有这个字段时不能因为 undefined 变成字符串 "undefined"
+  assert.strictEqual(normalize({ jenkins: { url: 'x' } }).jenkins.logDir, '');
+});
+
 test('normalize 收敛非法配置', () => {
   const config = normalize({
     intervalSec: 5, mode: 'nope', track: ['1', 'q:owner:self'],

@@ -5,6 +5,8 @@
   const $ = (id) => document.getElementById(id);
   const NEWLINE = String.fromCharCode(10);
   let saved = {};
+  // 日志目录留空时主进程会用的那个路径（只用来做占位提示）
+  let defaultLogDir = '';
 
   // 左栏切换：同一时间只显示一个分栏
   const navItems = [...document.querySelectorAll('.side-item')];
@@ -90,6 +92,8 @@
     $('jkUrl').value = jenkins.url || '';
     $('jkUser').value = jenkins.username || '';
     $('jkJobs').value = (jenkins.jobs || []).join(NEWLINE);
+    $('jkLogDir').value = jenkins.logDir || '';
+    $('jkLogDir').placeholder = defaultLogDir || '留空 = 程序目录下的 build_log';
     // 没存过密码、又检测到 ~/.gitcookies 时，预选 SSO 模式（还得点保存才生效）
     const hasCookieHint = (discovery?.hints || []).some((hint) => hint.kind === 'gitcookies');
     const authMode = config.authMode
@@ -131,7 +135,8 @@
       jenkins: {
         url: $('jkUrl').value.trim(),
         username: $('jkUser').value.trim(),
-        jobs: linesToTrack($('jkJobs').value)
+        jobs: linesToTrack($('jkJobs').value),
+        logDir: $('jkLogDir').value.trim()
       },
       notify: {
         cr: $('notifyCr').checked,
@@ -360,8 +365,15 @@
 
   $('revealConfig').addEventListener('click', () => api.revealConfig());
 
+  // 「选择…」：走系统目录选择框，只取路径，不建目录
+  $('jkLogDirPick').addEventListener('click', async () => {
+    const result = await api.pickDir();
+    if (result?.ok && result.path) $('jkLogDir').value = result.path;
+  });
+
   api.load().then(({ config, configPath, demo, discovery, hasPassword, hasJenkinsToken,
-    layers, version, startedAt }) => {
+    layers, version, startedAt, logDir }) => {
+    defaultLogDir = logDir || '';
     fill(config, configPath, demo, discovery, { hasPassword, hasJenkinsToken, layers });
     // 标题栏显示版本和启动时刻：一眼看出这个设置窗是不是刚启动的实例
     const stamp = document.querySelector('.titlebar-sub');

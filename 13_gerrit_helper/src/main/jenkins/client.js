@@ -15,6 +15,8 @@
 // 状态也可能自相矛盾：整体 IN_PROGRESS 但所有 stage 都是 SUCCESS，
 // 说明还卡在 stage 之间的步骤里。
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { net } = require('electron');
 
 function normalizeBase(input) {
@@ -31,6 +33,12 @@ function normalizeBase(input) {
 function jobUrl(base, job) {
   const parts = String(job || '').split('/').map((part) => part.trim()).filter(Boolean);
   return `${base}${parts.map((part) => `/job/${encodeURIComponent(part)}`).join('')}`;
+}
+
+// 控制台日志的地址。**一定要带具体构建号**：下载要几十秒，这中间起了新构建的话
+// lastBuild 就换人了，下下来的会是别人的日志。
+function consoleTextUrl(base, job, number) {
+  return `${jobUrl(base, job)}/${encodeURIComponent(String(number))}/consoleText`;
 }
 
 const STAGE_STATUS = Object.freeze({
@@ -203,6 +211,72 @@ function createJenkinsClient({ baseUrl, username, token, timeoutMs = 15000 }) {
   return {
     base,
 
+    // 控制台日志：纯文本，不是 JSON，所以不走 fetchJson。三个和状态接口不同的坑：
+    //   1. **必须带具体构建号**（见 consoleTextUrl）
+    //   2. 构建中也拿得到 —— 返回的是到目前为止的全文，末尾那行可能是半截
+    //   3. 大构建几十 MB：不能整块 .text() 进内存，流式写盘；
+    //      超时按"多久没收到新数据"算，不是总时长（总时长说不准）
+    async downloadConsole({ job, number, destFile, idleTimeoutMs = 30000 }) {
+      if (!base) throw new Error('未配置 Jenkins 地址');
+      const buildNumber = Number(number);
+      if (!Number.isInteger(buildNumber) || buildNumber <= 0) throw new Error('构建号无效');
+      if (!destFile) throw new Error('没给目标文件');
+      const url = consoleTextUrl(base, job, buildNumber);
+
+      const controller = new AbortController();
+      let timer = null;
+      const armIdle = () => { clearTimeout(timer); timer = setTimeout(() => controller.abort(), idleTimeoutMs); };
+      const started = Date.now();
+      let response;
+      try {
+        armIdle();
+        response = await net.fetch(url, {
+          headers: auth ? { Authorization: auth } : {},
+          signal: controller.signal
+        });
+      } catch (error) {
+        clearTimeout(timer);
+        if (error.name === 'AbortError') throw new Error(`超时（${idleTimeoutMs}ms 没数据）`);
+        throw new Error(`连不上 ${base}：${error.message}`);
+      }
+      if (response.status === 401 || response.status === 403) {
+        clearTimeout(timer);
+        throw Object.assign(new Error('认证失败：检查用户名与 API Token'), { status: response.status });
+      }
+      if (response.status === 404) {
+        clearTimeout(timer);
+        throw Object.assign(new Error(`构建号 ${buildNumber} 不存在`), { status: 404 });
+      }
+      if (!response.ok) {
+        clearTimeout(timer);
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      // 目录可能是第一次用（默认的 build_log 就不存在），顺手建出来
+      fs.mkdirSync(path.dirname(destFile), { recursive: true });
+      // 先写 .part 再改名：下到一半失败不会留下看起来完整的文件
+      const temp = `${destFile}.part`;
+      const out = fs.createWriteStream(temp);
+      let bytes = 0;
+      try {
+        for await (const chunk of response.body) {
+          armIdle();
+          bytes += chunk.length;
+          if (!out.write(chunk)) await new Promise((resolve) => out.once('drain', resolve));
+        }
+        clearTimeout(timer);
+        await new Promise((resolve, reject) => out.end((error) => (error ? reject(error) : resolve())));
+        fs.renameSync(temp, destFile);
+      } catch (error) {
+        clearTimeout(timer);
+        out.destroy();
+        try { fs.unlinkSync(temp); } catch (_) { /* 没有就算 */ }
+        if (error.name === 'AbortError') throw new Error(`下载中断：${idleTimeoutMs}ms 没收到新数据`);
+        throw error;
+      }
+      return { url, file: destFile, bytes, ms: Date.now() - started, buildNumber };
+    },
+
     async status(job) {
       const root = jobUrl(base, job);
       // lastBuild 可能 404（从没构建过），wfapi 也可能 404（不是 Pipeline job）
@@ -269,6 +343,7 @@ function createJenkinsClient({ baseUrl, username, token, timeoutMs = 15000 }) {
 
 module.exports = {
   STAGE_STATUS,
+  consoleTextUrl,
   createJenkinsClient,
   currentStage,
   jobUrl,

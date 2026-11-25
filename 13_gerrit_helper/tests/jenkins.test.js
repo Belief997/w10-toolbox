@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { currentStage, jobUrl, normalizeStages, withLiveDurations, withPending } = require('../src/main/jenkins/client');
+const { consoleTextUrl, currentStage, jobUrl, normalizeStages, withLiveDurations, withPending } = require('../src/main/jenkins/client');
 const { toBuildCell } = require('../src/shared/build');
 const { diffCells, rank, sortCells } = require('../src/shared/diff');
 
@@ -31,6 +31,13 @@ test('jobUrl 把 folder 路径拼成 Jenkins 的 URL 形式', () => {
   assert.strictEqual(
     jobUrl('https://jks.example.com', 'folder/sub/job'),
     'https://jks.example.com/job/folder/job/sub/job/job'
+  );
+});
+
+test('consoleTextUrl 一定要带构建号，不能用 lastBuild', () => {
+  assert.strictEqual(
+    consoleTextUrl('https://jks.example.com', 'ReleaseBuild~Demo~boardX~Arbitrary', 266),
+    'https://jks.example.com/job/ReleaseBuild~Demo~boardX~Arbitrary/266/consoleText'
   );
 });
 

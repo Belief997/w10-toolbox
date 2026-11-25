@@ -33,6 +33,9 @@
   let cells = [];
   let focused = -1;
   let nodes = [];
+  // 卡片上的「下载日志」按钮，按 cell.id 记一份 —— 主进程下完把结果推回来，
+  // 靠它把按钮从"下载中…"改回可点的样子
+  const logButtons = new Map();
   let railHeight = 0;
   let slots = [];
   let edge = 'right';
@@ -332,15 +335,30 @@
       timeline.append(list);
     }
 
+    // 一次只显示一张卡片：上一张的按钮记着也没用
+    logButtons.clear();
+
     const foot = document.createElement('div');
     foot.className = 'card-foot';
+    // 三个并排，字号小、宽度均分 —— 所以标签都压到 2–3 个字，完整说法放 title
     const open = document.createElement('button');
-    open.textContent = '在 Jenkins 打开';
+    open.textContent = '打开';
+    open.title = '在 Jenkins 打开这个构建';
     open.addEventListener('click', () => api.openUrl(cell.url));
+    const download = document.createElement('button');
+    download.textContent = '下载日志';
+    download.title = '把这一轮的控制台日志保存到本地';
+    download.addEventListener('click', () => {
+      if (download.disabled) return;
+      download.disabled = true;
+      download.textContent = '下载中…';
+      api.downloadLog(cell.id);
+    });
+    logButtons.set(cell.id, download);
     const refresh = document.createElement('button');
     refresh.textContent = '刷新';
     refresh.addEventListener('click', () => api.refresh());
-    foot.append(open, refresh);
+    foot.append(open, download, refresh);
 
     if (flash?.length) card.append(flashStrip(flash));
     card.append(head, subject, meta);
@@ -390,6 +408,7 @@
 
   function renderCard(cell, flash) {
     if (cell.kind === 'build') { renderBuildCard(cell, flash); return; }
+    logButtons.clear();
     const snapshot = roll.capture(content);
     content.replaceChildren();
 
@@ -524,6 +543,26 @@
     // 顶边吸附时卡片挂在竖条下面，尾巴在上边 —— 内容要跟着往下让出尾巴
     document.body.dataset.edge = payload.side || 'right';
     renderCard(payload.cell, payload.flash);
+  });
+
+  // 日志下载的结果：只改当前这张卡片上的按钮，cellId 对不上（卡片已经换成别的
+  // 格子了）就丢掉 —— 不能把别人的结果写在这张卡上
+  api.onLogState((payload) => {
+    if (surface !== 'card') return;
+    const button = logButtons.get(String(payload?.cellId || ''));
+    if (!button || !button.isConnected) return;
+    // 同一个构建已经在下了：保持"下载中…"的样子，别写成失败
+    if (payload.busy) return;
+    button.disabled = false;
+    button.textContent = payload.ok ? '已保存' : '下载失败';
+    button.title = payload.ok ? `已保存到 ${payload.file}` : payload.error;
+    if (!payload.ok) return;
+    // 三秒后变回去，不然这卡片上永远写着"已保存"
+    setTimeout(() => {
+      if (button.textContent !== '已保存') return;
+      button.textContent = '下载日志';
+      button.title = '把这一轮的控制台日志保存到本地';
+    }, 3000);
   });
 
   // 拖动：按下后移动超过 4px 才算拖拽，免得和点击打架

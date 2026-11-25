@@ -3,3 +3,5 @@ node_modules/
 data/
 *.log
 diagnose-*.png
+# 下载下来的构建控制台日志（默认目录就在程序目录下）
+build_log/

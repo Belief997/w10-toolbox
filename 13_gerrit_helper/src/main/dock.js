@@ -1099,6 +1099,12 @@ function createDock(options) {
       cardHeight = height;
       showCardIfMeasured();
     });
+    // 卡片上的「下载日志」：只透传 cellId，下载本身在主进程入口里做
+    ipcMain.on('dock:downloadLog', (event, payload) => {
+      const cellId = String(payload?.cellId || '');
+      if (!cellId) return;
+      options.onDownloadLog?.(cellId);
+    });
     ipcMain.on('dock:openUrl', (event, payload) => {
       const url = String(payload?.url || '');
       if (/^https?:\/\//i.test(url)) onOpenUrl?.(url);
@@ -1335,7 +1341,9 @@ function createDock(options) {
     // 调试用：读卡片窗口里的实际 DOM。
     // 卡片只有在 hover/气泡时才可见，所以先把第一格用气泡逼出来，
     // 再看圆点这些"看得见看不见"的元素真实量到多少像素。
-    debugCard: async (want = 0) => {
+    // clickText：给了就顺手点一下名字等于它的那个底部按钮（自检用 ——
+    // 「下载日志」这条链路必须真的从渲染层点下去，否则测不到 preload + IPC）
+    debugCard: async (want = 0, clickText = '') => {
       const win = wins.card;
       if (!win || win.isDestroyed()) return '(无卡片窗口)';
       const list = visibleCells();
@@ -1354,6 +1362,16 @@ function createDock(options) {
         sendCard(list[index]);
         send('rail', 'dock:focus', { focused: index });
         await new Promise((resolve) => setTimeout(resolve, 900));
+      }
+      if (clickText) {
+        await win.webContents.executeJavaScript(`(() => {
+          const button = [...document.querySelectorAll('.card-foot button')]
+            .find((el) => el.textContent.trim() === ${JSON.stringify(String(clickText))});
+          if (!button) return 'no-button';
+          button.click();
+          return 'clicked';
+        })()`).catch(() => 'click-failed');
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
       return win.webContents.executeJavaScript(`(() => {
         const all = (sel) => [...document.querySelectorAll(sel)];
@@ -1374,6 +1392,13 @@ function createDock(options) {
             clientH: scroll.clientHeight
           } : null,
           card: all('.card').map(box),
+          // 底部按钮：三个并排是不是真的排得下，看宽度
+          buttons: all('.card-foot button').map((el) => ({
+            text: el.textContent.trim(),
+            title: el.title,
+            disabled: el.disabled,
+            w: Math.round(el.getBoundingClientRect().width)
+          })),
           events: all('.event').map(box).slice(0, 3),
           dots: all('.event-dot').map(box).slice(0, 3),
           flashDots: all('.card-flash-dot').map(box),
@@ -1384,6 +1409,9 @@ function createDock(options) {
 
     refreshLayout: () => { layout(); pushAppearance(); },
     refreshAppearance: () => pushAppearance(),
+    // 日志下载的结果推回卡片。卡片可能已经换成别的格子了 —— 渲染层按 cellId 对，
+    // 对不上就扔掉，不当成当前这张卡片的状态。
+    pushLogState: (payload) => send('card', 'dock:logState', payload || {}),
     // seed = 重建时回填的旧数据；ok=false 表示这轮没拉到，
     // 两种都不算"已经拿到过数据"，面板继续显示"正在读取"
     setCells(next, { seed = false, ok = true } = {}) {
