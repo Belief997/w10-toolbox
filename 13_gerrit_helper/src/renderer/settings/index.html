@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Gerrit Helper · 设置</title>
+<link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+<div class="shell" id="shell">
+  <header class="titlebar">
+    <span class="titlebar-dot"></span>
+    <span class="titlebar-name">Gerrit Helper</span>
+    <span class="titlebar-sep">·</span>
+    <span class="titlebar-sub">设置</span>
+    <button class="titlebar-close" id="close" title="关闭">✕</button>
+  </header>
+<div class="layout">
+  <nav class="side">
+    <div class="side-head">Gerrit Helper</div>
+    <button class="side-item is-active" data-pane="server">服务器与认证</button>
+    <button class="side-item" data-pane="track">跟踪项</button>
+    <button class="side-item" data-pane="display">显示</button>
+    <button class="side-item" data-pane="build">构建</button>
+    <button class="side-item" data-pane="notify">通知</button>
+    <button class="side-item" data-pane="advanced">高级</button>
+  </nav>
+
+  <div class="main">
+    <div class="pane-scroll">
+
+      <section class="pane is-active" data-pane="server">
+        <h2>服务器与认证</h2>
+        <div id="discoveryBar" class="banner" hidden></div>
+        <div class="row">
+          <button id="discover" class="ghost">重新检测本机配置</button>
+          <span id="discoverResult" class="result"></span>
+        </div>
+        <label class="field">
+          <span>Gerrit 地址</span>
+          <input id="server" type="text" placeholder="https://gerrit.example.com" spellcheck="false" />
+        </label>
+        <div class="two">
+          <label class="field">
+            <span>用户名</span>
+            <input id="username" type="text" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>传输方式</span>
+            <select id="transport">
+              <option value="auto">自动（有 ssh 就用 SSH）</option>
+              <option value="ssh">仅 SSH（复用 ~/.ssh 密钥）</option>
+              <option value="rest">仅 HTTP REST</option>
+            </select>
+          </label>
+        </div>
+        <div class="two">
+          <label class="field">
+            <span>SSH 端口</span>
+            <input id="sshPort" type="text" placeholder="29418" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>SSH 用户（留空用上面的用户名）</span>
+            <input id="sshUser" type="text" placeholder="留空则用用户名" spellcheck="false" />
+          </label>
+        </div>
+        <details class="fold">
+          <summary>HTTP REST 认证（仅 REST 通道用得上）</summary>
+          <div class="two" style="margin-top: 10px">
+            <label class="field">
+              <span>HTTP password</span>
+              <input id="password" type="password" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>认证方式</span>
+              <select id="authMode">
+                <option value="basic">HTTP password</option>
+                <option value="gitcookies">复用 ~/.gitcookies 的 SSO 会话</option>
+                <option value="none">匿名（只读公开仓库）</option>
+              </select>
+            </label>
+          </div>
+          <p class="hint">
+            密码在 Gerrit 的 <b>Settings → HTTP Credentials</b> 生成，不是登录密码；本机用系统 DPAPI 加密保存。
+            <b>~/.gitcookies</b> 模式不复制 cookie，每次请求现读那个文件。
+          </p>
+        </details>
+        <div class="row">
+          <button id="test" class="ghost">测试连接</button>
+          <button id="clearSecrets" class="ghost">清除已保存的凭据</button>
+          <span id="testResult" class="result"></span>
+        </div>
+      </section>
+
+      <section class="pane" data-pane="track">
+        <h2>跟踪项</h2>
+        <label class="field">
+          <span>一行一个：change 号 / Change-Id / 链接，或 <code>q:</code> 开头的查询</span>
+          <textarea id="track" rows="12" spellcheck="false"
+            placeholder="10231&#10;I1a2b3c4d...&#10;q:reviewer:self is:open&#10;q:owner:self status:open"></textarea>
+        </label>
+        <p class="hint">
+          <code>reviewer:self is:open</code> 待我评审 · <code>owner:self status:open</code> 我提交的 ·
+          <code>project:xxx status:open</code> 整个项目
+        </p>
+        <label class="field">
+          <span>只看最近 <b id="recentValue">14</b> 天的改动（0 = 不限）</span>
+          <input id="recentDays" type="range" min="0" max="60" step="1" />
+        </label>
+        <div class="two">
+          <label class="field">
+            <span>直接输入天数</span>
+            <input id="recentDaysInput" type="number" min="0" max="365" step="1" />
+          </label>
+          <label class="field">
+            <span>刷新间隔（秒，最小 20）</span>
+            <input id="interval" type="number" min="20" max="3600" step="10" />
+          </label>
+        </div>
+      </section>
+
+      <section class="pane" data-pane="display">
+        <h2>显示</h2>
+    <p class="hint">这里的改动会<b>立刻</b>应用到悬浮层，方便对着看效果；点「保存」才写进配置，直接关窗则复原。</p>
+    <div id="previewState" class="result">预览：等待操作</div>
+        <label class="field">
+          <span>模式</span>
+          <select id="mode">
+            <option value="always">常驻显示</option>
+            <option value="autoHide">靠边自动隐藏</option>
+          </select>
+        </label>
+        <label class="check">
+          <input id="snap" type="checkbox" />
+          <span>吸附到屏幕边缘（关掉后可以直接拖到任意位置）</span>
+        </label>
+        <label class="field">
+          <span>排序（一屏放不下时用滚轮翻页）</span>
+          <select id="sort">
+            <option value="urgency">紧急度优先（CI 失败 → 待我评审 → 可提交 → 我在途）</option>
+            <option value="recent">最近更新优先</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>背景不透明度 <b id="alphaValue">70%</b>　拖动即时生效</span>
+          <input id="glassAlpha" type="range" min="0" max="100" step="1" />
+        </label>
+        <label class="field">
+          <span>设置窗自身不透明度 <b id="settingsAlphaValue">92%</b>（和悬浮层分开）</span>
+          <input id="settingsAlpha" type="range" min="0" max="100" step="1" />
+        </label>
+        <label class="field">
+          <span>材质</span>
+          <select id="material">
+            <option value="auto">自动（Windows 11 用真亚克力）</option>
+            <option value="tint">只用半透明底色</option>
+          </select>
+        </label>
+        <p class="hint">真亚克力需要 Windows 11（build 22000+）；不可用时自动回落到半透明底色。</p>
+      </section>
+
+      <section class="pane" data-pane="build">
+        <h2>Jenkins 构建监控</h2>
+        <label class="field">
+          <span>Jenkins 地址</span>
+          <input id="jkUrl" type="text" placeholder="https://jks.example.com" spellcheck="false" />
+        </label>
+        <div class="two">
+          <label class="field">
+            <span>用户名</span>
+            <input id="jkUser" type="text" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>API Token</span>
+            <input id="jkToken" type="password" spellcheck="false" />
+          </label>
+        </div>
+        <p class="hint">
+          Token 在 Jenkins 右上角 <b>你的用户名 → Configure → API Token</b> 生成。
+          和 Gerrit 密码一样用系统 DPAPI 加密保存。
+        </p>
+        <label class="field">
+          <span>监控的 job（一行一个，folder 用 <code>/</code> 分隔）</span>
+          <textarea id="jkJobs" rows="5" spellcheck="false"
+            placeholder="ReleaseBuild~Demo~boardX~Arbitrary"></textarea>
+        </label>
+        <div class="row">
+          <button id="testJenkins" class="ghost">测试连接</button>
+          <span id="jkResult" class="result"></span>
+        </div>
+      </section>
+
+      <section class="pane" data-pane="notify">
+        <h2>通知</h2>
+        <div class="checks">
+          <label><input id="notifyCr" type="checkbox" /> Code-Review 分值变化</label>
+          <label><input id="notifyStatus" type="checkbox" /> 提交 / 放弃</label>
+          <label><input id="notifyCi" type="checkbox" /> CI 失败 / 恢复</label>
+          <label><input id="notifyReview" type="checkbox" /> 有新的 reviewer 参与评审</label>
+          <label><input id="notifyComment" type="checkbox" /> 有新评论</label>
+          <label><input id="notifyPatchset" type="checkbox" /> 上传新 patch set</label>
+        </div>
+        <p class="hint">同一事件跨轮不重复弹；一次刷新超过 3 条会合并成一条。</p>
+      </section>
+
+      <section class="pane" data-pane="advanced">
+        <h2>高级</h2>
+        <label class="field">
+          <span>SSH 私钥路径（留空用 ~/.ssh 默认密钥）</span>
+          <input id="sshKey" type="text" placeholder="C:\Users\you\.ssh\id_rsa" spellcheck="false" />
+        </label>
+        <label class="field">
+          <span>扫描目录（一行一个，用于自动找 .gitreview；只往下找 3 层）</span>
+          <textarea id="scanRoots" rows="3" spellcheck="false" placeholder="D:\work\android"></textarea>
+        </label>
+        <label class="check">
+          <input id="allowInsecureCert" type="checkbox" />
+          <span>允许不受信任的 HTTPS 证书（公司自签 CA 时打开）</span>
+        </label>
+        <label class="check">
+          <input id="demoMode" type="checkbox" />
+          <span>演示模式（不连服务器，用假数据）</span>
+        </label>
+        <div class="row">
+          <button id="exportConfig" class="ghost">导出配置</button>
+          <button id="importConfig" class="ghost">导入配置</button>
+          <span id="configResult" class="result"></span>
+        </div>
+        <p class="hint">导出的文件<b>不含凭据</b>（密码 / Token），换机器导入后需要重填一次。</p>
+        <div class="row">
+          <button id="revealConfig" class="ghost">打开配置文件位置</button>
+          <span id="configPath" class="result"></span>
+        </div>
+      </section>
+
+    </div>
+
+    <footer>
+      <span id="saveResult"></span>
+      <button id="save" class="primary">保存</button>
+    </footer>
+  </div>
+</div>
+</div>
+<script src="settings.js"></script>
+</body>
+</html>

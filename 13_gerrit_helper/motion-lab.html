@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="zh-CN" data-reduce-motion="off">
+<head>
+<meta charset="utf-8" />
+<title>Gerrit Helper · 动效实验台</title>
+<style>
+  :root {
+    --glass-rgb: 48, 52, 56;
+    --glass-alpha: 0.68;
+    --overlay-rgb: 255, 255, 255;
+    --line-rgb: 232, 238, 244;
+    --line-alpha: 0.138;
+    --text: #eef5fb;
+    --muted: #a3adbb;
+    --accent: #b7ead4;
+    --accent-rgb: 183, 234, 212;
+    --success: #b7ead4;
+    --orange: #e8c27a;
+    --red: #f29a8c;
+    --blue: #8fb8f0;
+    --ui-font: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --display-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    --glass: rgba(var(--glass-rgb), var(--glass-alpha));
+    --line: rgba(var(--line-rgb), var(--line-alpha));
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    /* 假装是桌面：一块深色渐变墙纸，玻璃才有东西可以透 */
+    background:
+      radial-gradient(1200px 700px at 22% 18%, #2a3550 0%, transparent 60%),
+      radial-gradient(900px 600px at 78% 78%, #17303a 0%, transparent 62%),
+      linear-gradient(160deg, #0d1119 0%, #141a24 48%, #0b0f16 100%);
+    color: var(--text);
+    font-family: var(--ui-font);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+  }
+
+  .stage { position: relative; height: 100%; }
+
+  /* ---- 左侧：数字滚动实验 ------------------------------------------------ */
+  .panel {
+    position: absolute; left: 40px; top: 48px;
+    width: 380px; padding: 18px 20px 16px;
+    border-radius: 16px;
+    background: var(--glass);
+    border: 1px solid var(--line);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(32px) saturate(115%);
+  }
+  .panel h2 {
+    margin: 0 0 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .panel p { margin: 0 0 16px; font-size: 11px; line-height: 1.6; color: var(--muted); }
+  .readout { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .readout-caption { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+  .readout-value {
+    font-family: var(--display-font);
+    font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.02em;
+    color: var(--text);
+  }
+  .readout-suffix { font-size: 13px; color: var(--muted); font-weight: 600; }
+
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  button {
+    padding: 6px 10px; font: inherit; font-size: 11px;
+    color: var(--text); background: rgba(var(--overlay-rgb), 0.07);
+    border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
+    transition: background-color 140ms ease, border-color 140ms ease;
+  }
+  button:hover { background: rgba(var(--overlay-rgb), 0.12); }
+  button:active { transform: scale(0.97); }
+  button[data-on="yes"] { background: rgba(var(--accent-rgb), 0.16); border-color: rgba(var(--accent-rgb), 0.4); }
+
+  /* ---- 弹簧曲线 ---------------------------------------------------------- */
+  .curves { border-top: 1px solid var(--line); padding-top: 12px; }
+  .curves-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .curves-head span { font-size: 10px; color: var(--muted); }
+  .curves svg { display: block; width: 100%; height: 108px; overflow: visible; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+  .legend i { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-style: normal; color: var(--muted); }
+  .legend i::before { content: ''; width: 10px; height: 2px; border-radius: 1px; background: currentColor; }
+
+  /* ---- 右侧：rail -------------------------------------------------------- */
+  .rail-wrap {
+    position: absolute; right: 0; top: 50%;
+    width: 64px;
+  }
+  .rail-shape { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  .rail-shape-fill { fill: var(--glass); }
+  .rail-shape-line {
+    fill: none; stroke: var(--line); stroke-width: 1;
+    stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke;
+  }
+  .rail { position: absolute; inset: 0; }
+
+  .cell {
+    position: absolute; left: 4px; right: 4px; height: 70px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 7px; border-radius: 12px;
+  }
+  .ring { position: relative; width: 42px; height: 42px; display: grid; place-items: center; }
+  .ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+  .ring-track { fill: none; stroke: rgba(var(--overlay-rgb), 0.12); stroke-width: 4; }
+  .ring-fill {
+    fill: none; stroke: var(--ring-color); stroke-width: 4; stroke-linecap: round;
+    transition: stroke-dashoffset 420ms cubic-bezier(0.2, 0.8, 0.2, 1), filter 180ms ease;
+  }
+  /* hover 不加选中块：让环用自己那个颜色泛光 */
+  .cell.is-focused .ring-fill {
+    filter: drop-shadow(0 0 3px color-mix(in srgb, var(--ring-color) 55%, transparent));
+  }
+  .cell-mark { font-size: 10px; font-weight: 700; letter-spacing: 0.02em; color: var(--text); }
+  .cell-value {
+    font-family: var(--display-font);
+    font-size: 12px; font-weight: 650; line-height: 1; letter-spacing: -0.01em;
+    color: var(--text); white-space: nowrap;
+  }
+  .cell[data-status="error"] .cell-value { color: var(--red); }
+  .cell[data-status="pending"] .cell-value { color: var(--orange); }
+
+  /* ---- 卡片 -------------------------------------------------------------- */
+  .card {
+    position: absolute; right: 72px; top: 0; width: 280px;
+    padding: 12px 14px 10px;
+    border-radius: 18px;
+    background: var(--glass);
+    border: 1px solid var(--line);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(32px) saturate(115%);
+    opacity: 0; pointer-events: none;
+  }
+  .card.is-open { opacity: 1; pointer-events: auto; animation: card-in 160ms ease-out both; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .card-title { font-family: var(--display-font); font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+  .card-sub { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+  .card-timeline { position: relative; margin-top: 10px; padding-top: 10px; display: grid; gap: 7px; }
+  /* 羽化发丝线：两端透明，不是实线 */
+  .card-timeline::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(to right,
+      rgba(var(--line-rgb), 0) 0,
+      rgba(var(--line-rgb), 0.075) 22%,
+      rgba(var(--line-rgb), 0.075) 78%,
+      rgba(var(--line-rgb), 0) 100%);
+  }
+  .event { display: grid; grid-template-columns: 14px 1fr auto; align-items: baseline; gap: 8px; font-size: 11px; }
+  .event-time { font-size: 9px; color: var(--muted); }
+  .event-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); align-self: center; }
+  .event[data-tone="warn"] .event-dot { background: var(--orange); }
+  .event[data-tone="bad"] .event-dot { background: var(--red); }
+
+  /* ---- 动效 -------------------------------------------------------------- */
+  @keyframes rail-in {
+    from { transform: translateX(14px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+  /* 入场：窗口淡入 150ms 与内容滑入 150ms 用同一个时长和曲线，合拍成一个动作 */
+  .rail-wrap.is-revealing { animation: rail-in 150ms cubic-bezier(0.33, 1, 0.68, 1) both; }
+
+  @keyframes card-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  /* ---- 数字滚动：字形层 ----------------------------------------------- */
+  [data-gn-roll="roll"] { overflow: visible; }
+  .gn-glyphs {
+    --gn-fade-top: 0.16em;
+    --gn-fade-bottom: 0.16em;
+    --gn-left-room: calc(0.25em + var(--gn-overhang-left, 0px));
+    --gn-right-room: calc(0.25em + var(--gn-overhang-right, 0px));
+    display: inline-flex;
+    position: relative;
+    vertical-align: bottom;
+    /* padding 撑开遮罩、margin 抵消回来：给它遮罩空间但不影响排版 */
+    margin: calc(-1 * var(--gn-fade-top)) calc(-1 * var(--gn-right-room))
+            calc(-1 * var(--gn-fade-bottom)) calc(-1 * var(--gn-left-room));
+    padding: var(--gn-fade-top) var(--gn-right-room) var(--gn-fade-bottom) var(--gn-left-room);
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--gn-fade-top),
+      #000 calc(100% - var(--gn-fade-bottom)), transparent);
+  }
+  .gn-place { display: inline-grid; position: relative; flex: 0 0 auto; overflow: visible; transform-origin: top left; }
+  .gn-glyph { grid-area: 1 / 1; transform-origin: center; will-change: transform, opacity; }
+  .gn-previous { position: absolute; }
+  .gn-reading {
+    position: absolute; width: 1px; height: 1px; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+
+  /* ---- 减少动效：一票否决，连 SMIL 一起停 -------------------------------- */
+  html[data-reduce-motion="on"] .rail-wrap,
+  html[data-reduce-motion="on"] .rail-wrap *,
+  html[data-reduce-motion="on"] .panel,
+  html[data-reduce-motion="on"] .panel * {
+    animation: none !important;
+    transition: none !important;
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <section class="panel" id="panel">
+    <h2>数字滚动</h2>
+    <p>
+      弹簧采样的实装验证。点「推新数据」看数字滚动，
+      点「只重建 DOM」看数值不变时<b>不</b>重放动画 —— 这正是轮询界面最容易翻车的地方。
+    </p>
+    <div class="readout">
+      <span class="readout-caption">待评审</span>
+      <span class="readout-value" data-roll-key="pending" data-roll-text="128" data-roll-value="128">128</span>
+      <span class="readout-suffix">条</span>
+    </div>
+    <div class="row">
+      <button id="push">推新数据</button>
+      <button id="rebuild">只重建 DOM</button>
+      <button id="replay">重放入场</button>
+      <button id="motion">减少动效</button>
+    </div>
+
+    <div class="curves">
+      <div class="curves-head">
+        <span>四条弹簧通道（0 → 0.7s）</span>
+        <span id="keyframes">— 关键帧</span>
+      </div>
+      <svg id="curveSvg" viewBox="0 0 320 108" preserveAspectRatio="none"></svg>
+      <div class="legend">
+        <i style="color:#b7ead4">position 0.55/0.353</i>
+        <i style="color:#8fb8f0">body 1.00/0.278</i>
+        <i style="color:#e8c27a">blur 0.91/0.398</i>
+        <i style="color:#f29a8c">smear 1.00/0.220</i>
+      </div>
+    </div>
+  </section>
+
+  <div class="rail-wrap is-revealing" id="railWrap">
+    <svg class="rail-shape" id="railShape" viewBox="0 0 64 350" aria-hidden="true">
+      <path class="rail-shape-fill" id="railFill"></path>
+      <path class="rail-shape-line" id="railLine"></path>
+    </svg>
+    <div class="rail" id="rail"></div>
+    <div class="card" id="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title" id="cardTitle">platform/frameworks/base</div>
+          <div class="card-sub" id="cardSub">+12 −3 · a@corp.com</div>
+        </div>
+      </div>
+      <div class="card-timeline" id="cardTimeline"></div>
+    </div>
+  </div>
+</div>
+
+<script src="src/motion/spring.js"></script>
+<script src="src/motion/roll.js"></script>
+<script>
+(function main() {
+  const spring = window.GerritSpring;
+  const roll = window.GerritRoll;
+  const ARC = 0.448;
+
+  // ---- 形状：和材质共用同一份路径 ----------------------------------------
+  function railCommands({ width: w, height: h, shoulder: s, radius, open = false }) {
+    s = Math.max(0, Math.min(s, h / 2));
+    const spread = Math.min(w * 0.53, w - radius);
+    const r = Math.max(0, Math.min(radius, (h - 2 * s) / 2, w - spread));
+    const commands = [
+      ['M', w, 0],
+      ['C', w, s * 0.76, w - w * 0.25, s, w - spread, s],
+      ['L', r, s],
+      ['C', r * ARC, s, 0, s + r * ARC, 0, s + r],
+      ['L', 0, h - s - r],
+      ['C', 0, h - s - r * ARC, r * ARC, h - s, r, h - s],
+      ['L', w - spread, h - s],
+      ['C', w - w * 0.25, h - s, w, h - s * 0.76, w, h]
+    ];
+    if (!open) commands.push(['Z']);
+    return commands;
+  }
+  const toPath = (commands) => commands
+    .map(([op, ...pts]) => `${op}${pts.map((n) => Math.round(n * 100) / 100).join(' ')}`).join(' ');
+
+  const RAIL_W = 64, CELL_H = 70, CELL_GAP = 2, SHOULDER = 28, PADDING = 4, RADIUS = 20;
+  const cells = [
+    { id: 'a', mark: '+2', value: '88%', pct: 88, color: '#b7ead4', status: 'ok',
+      title: 'platform/frameworks/base', sub: '+12 −3 · a@corp.com',
+      events: [['14:02', 'Code-Review +2', 'ok'], ['13:40', 'CI passed', 'ok'], ['11:08', 'Uploaded patch set 4', 'ok']] },
+    { id: 'b', mark: 'CI', value: '2/3', pct: 66, color: '#f29a8c', status: 'error',
+      title: 'vendor/hal/camera', sub: '+8 −1 · b@corp.com',
+      events: [['14:15', 'CI failed · build', 'bad'], ['13:52', 'Uploaded patch set 2', 'ok'], ['13:20', 'Code-Review +1', 'ok']] },
+    { id: 'c', mark: 'CR', value: '1/3', pct: 33, color: '#e8c27a', status: 'pending',
+      title: 'sdk/tools/gerrit-helper', sub: '+140 −0 · c@corp.com',
+      events: [['12:31', '@you requested review', 'warn'], ['12:30', 'Uploaded patch set 1', 'ok']] },
+    { id: 'd', mark: '✓', value: '100%', pct: 100, color: '#8fb8f0', status: 'ok',
+      title: 'build/soong', sub: '+6 −2 · d@corp.com',
+      events: [['10:44', 'Submitted', 'ok'], ['10:12', 'Code-Review +2', 'ok'], ['09:30', 'CI passed', 'ok']] }
+  ];
+
+  const railHeight = SHOULDER * 2 + PADDING * 2 + cells.length * CELL_H + (cells.length - 1) * CELL_GAP;
+  const railWrap = document.getElementById('railWrap');
+  railWrap.style.height = `${railHeight}px`;
+  // 用 margin 而不是 transform 做垂直居中：入场动画自己要用 transform，
+  // 两者写在同一个元素上会互相覆盖（动画结束后 `transform: none` 会把居中吃掉）。
+  railWrap.style.marginTop = `${-railHeight / 2}px`;
+  document.getElementById('railShape').setAttribute('viewBox', `0 0 ${RAIL_W} ${railHeight}`);
+  document.getElementById('railFill').setAttribute('d',
+    toPath(railCommands({ width: RAIL_W, height: railHeight, shoulder: SHOULDER, radius: RADIUS })));
+  document.getElementById('railLine').setAttribute('d',
+    toPath(railCommands({ width: RAIL_W, height: railHeight, shoulder: SHOULDER, radius: RADIUS, open: true })));
+
+  // ---- rail 的格子 -------------------------------------------------------
+  const rail = document.getElementById('rail');
+  const RING_R = 18;
+  const RING_C = 2 * Math.PI * RING_R;
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  cells.forEach((cell, index) => {
+    const node = document.createElement('div');
+    node.className = 'cell';
+    node.dataset.status = cell.status;
+    node.style.top = `${SHOULDER + PADDING + index * (CELL_H + CELL_GAP)}px`;
+    node.style.setProperty('--ring-color', cell.color);
+
+    const ring = document.createElement('div');
+    ring.className = 'ring';
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 42 42');
+    svg.setAttribute('aria-hidden', 'true');
+    const track = document.createElementNS(SVG_NS, 'circle');
+    track.setAttribute('class', 'ring-track');
+    const fill = document.createElementNS(SVG_NS, 'circle');
+    fill.setAttribute('class', 'ring-fill');
+    for (const circle of [track, fill]) {
+      circle.setAttribute('cx', '21'); circle.setAttribute('cy', '21'); circle.setAttribute('r', RING_R);
+    }
+    fill.setAttribute('stroke-dasharray', String(RING_C));
+    fill.setAttribute('stroke-dashoffset', String(RING_C * (1 - cell.pct / 100)));
+    svg.append(track, fill);
+
+    const mark = document.createElement('span');
+    mark.className = 'cell-mark';
+    mark.textContent = cell.mark;
+    ring.append(svg, mark);
+
+    const value = document.createElement('span');
+    value.className = 'cell-value';
+    value.textContent = cell.value;
+
+    node.append(ring, value);
+    node.addEventListener('mouseenter', () => focusCell(index));
+    rail.append(node);
+  });
+
+  // ---- 卡片 --------------------------------------------------------------
+  const card = document.getElementById('card');
+  let hideTimer = 0;
+  let focused = -1;
+
+  function focusCell(index) {
+    clearTimeout(hideTimer);
+    if (index === focused) { openCard(index); return; }
+    focused = index;
+    for (const [i, node] of [...rail.children].entries()) node.classList.toggle('is-focused', i === index);
+    openCard(index);
+  }
+
+  function openCard(index) {
+    const cell = cells[index];
+    document.getElementById('cardTitle').textContent = cell.title;
+    document.getElementById('cardSub').textContent = cell.sub;
+    const timeline = document.getElementById('cardTimeline');
+    timeline.replaceChildren(...cell.events.map(([time, text, tone]) => {
+      const row = document.createElement('div');
+      row.className = 'event';
+      row.dataset.tone = tone;
+      row.innerHTML = `<span class="event-dot"></span><span>${text}</span><span class="event-time">${time}</span>`;
+      return row;
+    }));
+    // 垂直居中到被 hover 的格子
+    const top = SHOULDER + PADDING + index * (CELL_H + CELL_GAP) + CELL_H / 2;
+    const height = card.offsetHeight || 150;
+    card.style.top = `${Math.max(8, Math.min(railHeight - height - 8, top - height / 2))}px`;
+    card.classList.remove('is-open');
+    void card.offsetWidth;          // 强制重排，让入场动画能重放
+    card.classList.add('is-open');
+  }
+
+  function scheduleHide() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      focused = -1;
+      card.classList.remove('is-open');
+      for (const node of rail.children) node.classList.remove('is-focused');
+    }, 320);
+  }
+  rail.addEventListener('mouseleave', scheduleHide);
+  card.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+  card.addEventListener('mouseleave', scheduleHide);
+
+  // ---- 数字滚动 ----------------------------------------------------------
+  const panel = document.getElementById('panel');
+  const valueNode = panel.querySelector('[data-roll-key="pending"]');
+  const state = { pending: 128 };
+
+  // 渲染 = 重建 DOM。这里只改一个 span 的文本，但 capture/play 的协议对
+  // 整个列表重建同样成立（key 不同而已）。
+  function render({ animate = true } = {}) {
+    const snapshot = animate ? roll.capture(panel) : null;
+    valueNode.textContent = String(state.pending);
+    roll.mark(valueNode, 'pending', state.pending);
+    if (snapshot) roll.play(panel, snapshot);
+  }
+
+  document.getElementById('push').addEventListener('click', () => {
+    // 有时变大有时变小，验证上下两个方向
+    state.pending = Math.random() < 0.5
+      ? state.pending + 1 + Math.floor(Math.random() * 40)
+      : Math.max(0, state.pending - 1 - Math.floor(Math.random() * 30));
+    render();
+  });
+  document.getElementById('rebuild').addEventListener('click', () => render());
+  document.getElementById('replay').addEventListener('click', () => {
+    railWrap.classList.remove('is-revealing');
+    void railWrap.offsetWidth;
+    railWrap.classList.add('is-revealing');
+  });
+  const motionButton = document.getElementById('motion');
+  motionButton.addEventListener('click', () => {
+    const on = document.documentElement.dataset.reduceMotion !== 'on';
+    document.documentElement.dataset.reduceMotion = on ? 'on' : 'off';
+    motionButton.dataset.on = on ? 'yes' : 'no';
+  });
+
+  // ---- 弹簧曲线 ----------------------------------------------------------
+  const svg = document.getElementById('curveSvg');
+  const W = 320, H = 108, PAD = 8, MAX_T = 0.7;
+  const colors = { position: '#b7ead4', body: '#8fb8f0', blur: '#e8c27a', smear: '#f29a8c' };
+  let minV = Infinity, maxV = -Infinity;
+  const series = spring.CHANNELS.map((channel) => {
+    const points = [];
+    for (let i = 0; i <= 140; i += 1) {
+      const t = (i / 140) * MAX_T;
+      const v = spring.curve(channel, t);
+      minV = Math.min(minV, v); maxV = Math.max(maxV, v);
+      points.push([t, v]);
+    }
+    return { channel, points };
+  });
+  minV = Math.min(minV, -0.02); maxV = Math.max(maxV, 1.02);
+  const x = (t) => PAD + (t / MAX_T) * (W - PAD * 2);
+  const y = (v) => H - PAD - ((v - minV) / (maxV - minV)) * (H - PAD * 2);
+
+  const grid = document.createElementNS(SVG_NS, 'path');
+  grid.setAttribute('d', `M${x(0)} ${y(1)} H${x(MAX_T)}`);
+  grid.setAttribute('stroke', 'rgba(232,238,244,0.18)');
+  grid.setAttribute('stroke-dasharray', '2 3');
+  grid.setAttribute('fill', 'none');
+  svg.append(grid);
+
+  for (const { channel, points } of series) {
+    const line = document.createElementNS(SVG_NS, 'path');
+    line.setAttribute('d', points.map(([t, v], i) => `${i ? 'L' : 'M'}${x(t).toFixed(2)} ${y(v).toFixed(2)}`).join(' '));
+    line.setAttribute('fill', 'none');
+    line.setAttribute('stroke', colors[channel]);
+    line.setAttribute('stroke-width', '1.6');
+    line.setAttribute('stroke-linecap', 'round');
+    line.setAttribute('opacity', '0.9');
+    svg.append(line);
+  }
+  document.getElementById('keyframes').textContent = `${spring.offsets(0).length} 关键帧`;
+
+  // 方便静态截图/自查：motion-lab.html?hover 打开时预先展开第一张卡片
+  if (/[?&]hover/.test(location.search)) setTimeout(() => focusCell(0), 80);
+
+  // motion-lab.html?selftest 跑一遍滚动路径，把结果写进 DOM，方便无头验证
+  if (/[?&]selftest/.test(location.search)) {
+    const report = document.createElement('pre');
+    report.id = 'selftest';
+    report.style.cssText = 'position:absolute;left:8px;bottom:8px;font-size:11px;color:#b7ead4;white-space:pre-wrap';
+    document.body.append(report);
+    const log = [];
+    const step = (label, fn) => {
+      try { fn(); log.push(`${label} ok`); } catch (error) { log.push(`${label} FAIL ${error.message}`); }
+    };
+    setTimeout(() => {
+      step('grow', () => { state.pending = 191; render(); });
+      step('shrink', () => { state.pending = 42; render(); });
+      step('widen', () => { state.pending = 1000; render(); });
+      step('narrow', () => { state.pending = 7; render(); });
+      setTimeout(() => {
+        log.push(`rolling=${document.querySelectorAll('[data-gn-roll]').length}`);
+        log.push(`glyphs=${document.querySelectorAll('.gn-glyph').length}`);
+        log.push(`final=${valueNode.textContent}`);
+        report.textContent = log.join('\n');
+      }, 900);
+    }, 200);
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

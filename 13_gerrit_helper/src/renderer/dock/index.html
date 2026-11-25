@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Gerrit Helper</title>
+<link rel="stylesheet" href="dock.css" />
+</head>
+<body class="dock-surface">
+  <!-- 形状是画出来的：填充和描边都用主进程给的同一份路径 -->
+  <svg class="shape" id="shape" preserveAspectRatio="none" aria-hidden="true">
+    <path class="shape-fill" id="shapeFill"></path>
+    <path class="shape-line" id="shapeLine"></path>
+  </svg>
+  <div class="content" id="content"></div>
+
+  <script src="../../motion/spring.js"></script>
+  <script src="../../motion/roll.js"></script>
+  <script src="dock.js"></script>
+</body>
+</html>

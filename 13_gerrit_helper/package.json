@@ -1,0 +1,17 @@
+{
+  "name": "gerrit-helper",
+  "productName": "Gerrit Helper",
+  "version": "0.1.0",
+  "description": "贴边悬浮的 Gerrit 任务跟踪器",
+  "private": true,
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "build:backdrop": "node scripts/build-windows-backdrop.js",
+    "demo": "electron . --demo",
+    "test": "node --test tests/*.test.js"
+  },
+  "devDependencies": {
+    "electron": "^43.0.0"
+  }
+}

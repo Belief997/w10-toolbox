@@ -1,0 +1,5 @@
+node_modules/
+# 运行时数据：配置（含加密凭据）、日志、诊断截图都是本机的，不进仓库
+data/
+*.log
+diagnose-*.png
