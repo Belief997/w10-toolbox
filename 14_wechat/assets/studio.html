@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>动作流程 · 微信</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171c22; --panel-2: #1e242c; --line: #2a323c;
+    --text: #e6edf3; --muted: #8b98a7; --accent: #7fd1b9; --warn: #e8c27a;
+    --bad: #f29a8c; --click: #8fb8f0;
+    --font: ui-monospace, "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px;
+         padding: 22px 26px 70px; max-width: 940px; margin: 0 auto; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  h1 { font-size: 15px; font-weight: 650; }
+  .win { color: var(--muted); font-size: 11.5px; }
+  .win b { color: var(--accent); font-weight: 600; }
+  .actions { margin-left: auto; display: flex; gap: 8px; }
+  button { font: inherit; font-size: 12px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+           color: var(--text); background: var(--panel-2); border: 1px solid var(--line);
+           transition: background-color 140ms ease, opacity 120ms ease; }
+  button:hover { background: #263039; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { border-color: #2f6f5e; background: #1d3b33; color: #cdf3e7; }
+  button.primary:hover { background: #245045; }
+  button.mini { padding: 3px 8px; font-size: 11px; border-radius: 6px; }
+  button.danger { border-color: #6b3a34; color: #ffd9d3; background: #3a2320; }
+  select { font: inherit; font-size: 11.5px; color: var(--text); background: #10141a;
+           border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+
+  .flow { position: relative; margin-top: 20px; padding-left: 34px; }
+  .flow::before { content: ''; position: absolute; left: 15px; top: 10px; bottom: 26px;
+                  width: 2px; background: linear-gradient(to bottom, var(--line), #1b2027); }
+  .step { position: relative; margin-bottom: 8px; }
+  .step::before { content: ''; position: absolute; left: -24px; top: 18px; width: 10px; height: 10px;
+                  border-radius: 50%; background: var(--panel-2); border: 2px solid var(--line); }
+  .step[data-type="click"]::before { border-color: var(--click); background: #14202c; }
+  .step[data-type="paste"]::before { border-color: var(--accent); background: #12241f; }
+  .step[data-type="wait"]::before { border-color: var(--warn); background: #241f12; }
+  .step[data-type="key"]::before { border-color: var(--bad); background: #2a1a17; }
+  .step.unrecorded::before { border-color: var(--bad); box-shadow: 0 0 0 4px rgba(242,154,140,.15); }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          padding: 9px 11px; display: flex; align-items: center; gap: 9px; }
+  .card:hover { border-color: #34404c; }
+  .idx { color: var(--muted); font-size: 11px; width: 18px; text-align: right; flex: 0 0 auto; }
+  .body { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  input[type="text"], textarea, input[type="number"] {
+    font: inherit; font-size: 12.5px; color: var(--text); background: #10141a;
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; width: 100%; }
+  input:focus, textarea:focus { outline: none; border-color: #3d5a78; }
+  textarea { resize: vertical; min-height: 32px; line-height: 1.5; }
+  .name, .ms, .key { flex: 0 0 auto; }
+  .name { width: 110px; } .ms { width: 86px; } .key { width: 86px; }
+  .hintline { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .hintline b { color: var(--text); font-weight: 600; }
+  .missing { color: var(--bad); }
+
+  .addbar { margin-top: 14px; padding-left: 34px; display: flex; gap: 8px; align-items: center; }
+  .logs { margin-top: 18px; background: #0c1014; border: 1px solid var(--line); border-radius: 10px;
+          padding: 10px 12px; font-size: 11.5px; color: #b8c4d0; max-height: 190px; overflow: auto;
+          white-space: pre-wrap; line-height: 1.6; }
+  .hint { color: var(--muted); font-size: 11.5px; margin-top: 12px; line-height: 1.8; }
+  .libbar { margin-top: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+            padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  .libbar .liblabel { color: var(--muted); font-size: 11.5px; margin-right: 2px; }
+  .libbar select { min-width: 180px; }
+  .libbar input[type="text"] { width: 150px; font-size: 12px; padding: 5px 8px; }
+  .bp { flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%; padding: 0;
+        border: 1px solid var(--line); background: transparent; color: transparent; font-size: 9px; line-height: 1; }
+  .bp:hover { border-color: var(--bad); }
+  .bp.on { background: var(--bad); border-color: var(--bad); color: #201514; }
+  .paused { margin-top: 12px; padding: 9px 12px; border-radius: 10px; border: 1px solid #6b3a34;
+            background: #2a1a17; color: #ffd9d3; display: none; align-items: center; gap: 10px; font-size: 12px; }
+  .paused.show { display: flex; }
+  .paused button { border-color: #6b3a34; }
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 26px; background: #1d3b33;
+           border: 1px solid #2f6f5e; color: #cdf3e7; padding: 8px 16px; border-radius: 10px;
+           font-size: 12px; opacity: 0; transition: opacity 180ms ease; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>动作流程</h1>
+  <div class="win" id="win">窗口：读取中…</div>
+  <div class="actions">
+    <button id="refresh">重读窗口</button>
+    <button id="session">整段录制</button>
+    <button id="reset">恢复默认流程</button>
+    <button id="play">演练（不发）</button>
+    <button id="log">日志</button>
+    <button id="send" class="primary">发送</button>
+  </div>
+</header>
+
+<div class="libbar">
+  <span class="liblabel">流程库</span>
+  <select id="flowPick"><option value="">（没有存过的流程）</option></select>
+  <button id="flowLoad">加载</button>
+  <input id="flowName" type="text" placeholder="流程名" />
+  <button id="flowSave">保存</button>
+  <button id="flowDelete" class="danger">删除</button>
+  <button id="flowExport" class="mini">导出 JSON</button>
+  <button id="flowImport" class="mini">导入</button>
+  <input type="file" id="flowFile" accept=".json,application/json" hidden />
+</div>
+
+<div class="flow" id="flow"></div>
+<div class="addbar">
+  <select id="addType">
+    <option value="click">点击</option>
+    <option value="paste">粘贴</option>
+    <option value="wait">等待</option>
+    <option value="key">按键</option>
+  </select>
+  <button id="add">＋ 添加动作</button>
+  <span class="hintline">任意顺序、任意步骤，都能改</span>
+</div>
+
+<div class="hint">
+  · <b>重录</b>：点一下按钮，然后到微信窗口里点你要的位置，坐标立刻更新（相对窗口左上角存，窗口挪位置不受影响）<br />
+  · <b>整段录制</b>：在微信里正常操作一遍（点、粘贴、回车都算，停顿也会记成「等待」），按 Esc 结束，整份流程被这次录制替换<br />
+  · 坐标显示 <span class="missing">未录制</span> 的点会点在窗口左上角 —— 发之前先演练一次
+</div>
+
+<div class="paused" id="paused">
+  <span id="pausedText">已暂停</span>
+  <button id="resume" class="primary">继续</button>
+  <button id="breakAbort" class="danger">中止</button>
+</div>
+
+<div class="logs" id="logs">（还没有执行记录）</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let steps = [];
+let recording = null;
+let runActive = false;
+
+async function call(path, body) {
+  const res = await fetch(path, body === undefined
+    ? { method: 'POST' }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  return res.json();
+}
+
+function toast(text) {
+  const el = $('toast');
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+const save = () => call('/api/save', { steps });
+const busy = () => recording !== null || runActive;
+
+const TYPE_LABEL = { click: '点击', paste: '粘贴', wait: '等待', key: '按键' };
+
+function renderWindow(win, recorded) {
+  if (!win || win.ok === false) { $('win').innerHTML = '窗口：<b class="missing">未找到微信</b>'; return; }
+  const r = win.rect;
+  // 窗口尺寸变了，面板布局就变了，录下来的坐标会整体偏 —— 直接提示重录
+  const mismatch = recorded && r.width && Math.abs(r.width - recorded.width) / recorded.width > 0.03;
+  $('win').innerHTML = `窗口：<b>${r.left},${r.top}</b> ${r.width}×${r.height}`
+    + (mismatch ? ` <span class="missing">尺寸变了（录制时 ${recorded.width}×${recorded.height}），建议重录</span>` : '');
+}
+
+function fields(step, index) {
+  const box = document.createElement('div');
+  box.className = 'body';
+
+  if (step.type === 'click') {
+    const name = document.createElement('input');
+    name.type = 'text'; name.className = 'name'; name.value = step.name || ''; name.placeholder = '这一步叫什么';
+    name.addEventListener('input', () => { steps[index].name = name.value; save(); });
+
+    const coords = document.createElement('span');
+    coords.className = 'hintline';
+    coords.innerHTML = step.recorded
+      ? `相对窗口 <b>${step.rel.x},${step.rel.y}</b>`
+      : '<span class="missing">未录制</span>';
+
+    const rec = document.createElement('button');
+    rec.className = 'mini';
+    rec.textContent = recording === index ? '等点击…' : '重录';
+    rec.disabled = busy();
+    rec.addEventListener('click', async () => {
+      recording = index; render(); toast('到微信里点一下');
+      const result = await call('/api/record', { index });
+      recording = null;
+      if (result.ok) { steps = result.steps; toast(`已记录 ${result.rel.x},${result.rel.y}`); }
+      else toast(`录制失败：${result.error}`);
+      render();
+    });
+
+    box.append(name, coords, rec);
+  } else if (step.type === 'paste') {
+    const text = document.createElement('textarea');
+    text.rows = 1; text.value = step.text || ''; text.placeholder = '粘贴的内容';
+    text.addEventListener('input', () => { steps[index].text = text.value; save(); });
+    box.append(text);
+  } else if (step.type === 'wait') {
+    const ms = document.createElement('input');
+    ms.type = 'number'; ms.className = 'ms'; ms.min = '0'; ms.step = '100'; ms.value = step.ms || 0;
+    ms.addEventListener('input', () => { steps[index].ms = Number(ms.value) || 0; save(); });
+    const unit = document.createElement('span');
+    unit.className = 'hintline'; unit.textContent = '毫秒';
+    box.append(ms, unit);
+  } else {
+    const key = document.createElement('input');
+    key.type = 'text'; key.className = 'key'; key.value = step.key || ''; key.placeholder = 'enter / ^enter';
+    key.addEventListener('input', () => { steps[index].key = key.value; save(); });
+    box.append(key);
+  }
+  return box;
+}
+
+function stepCard(step, index) {
+  const wrap = document.createElement('div');
+  wrap.className = 'step';
+  wrap.dataset.type = step.type;
+  if (step.type === 'click' && !step.recorded) wrap.classList.add('unrecorded');
+
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const idx = document.createElement('span');
+  idx.className = 'idx';
+  idx.textContent = String(index + 1);
+
+  const type = document.createElement('select');
+  for (const [value, label] of Object.entries(TYPE_LABEL)) {
+    const option = document.createElement('option');
+    option.value = value; option.textContent = label;
+    if (value === step.type) option.selected = true;
+    type.append(option);
+  }
+  type.disabled = busy();
+  type.addEventListener('change', async () => {
+    const result = await call('/api/insert', { at: index, type: type.value });
+    // 插入新的同类型动作，再删掉原来的 —— 简单可靠
+    if (result.ok) {
+      steps = result.steps;
+      steps.splice(index + 1, 1);
+      save(); render();
+    }
+  });
+
+  const plus = document.createElement('button');
+  plus.className = 'mini'; plus.textContent = '＋'; plus.title = '在下面插入一步';
+  plus.disabled = busy();
+  plus.addEventListener('click', async () => {
+    const result = await call('/api/insert', { at: index + 1, type: $('addType').value });
+    if (result.ok) { steps = result.steps; render(); }
+  });
+
+  const up = document.createElement('button');
+  up.className = 'mini'; up.textContent = '↑'; up.disabled = busy() || index === 0;
+  up.addEventListener('click', () => {
+    [steps[index - 1], steps[index]] = [steps[index], steps[index - 1]];
+    save(); render();
+  });
+
+  const down = document.createElement('button');
+  down.className = 'mini'; down.textContent = '↓'; down.disabled = busy() || index === steps.length - 1;
+  down.addEventListener('click', () => {
+    [steps[index + 1], steps[index]] = [steps[index], steps[index + 1]];
+    save(); render();
+  });
+
+  const del = document.createElement('button');
+  del.className = 'mini danger'; del.textContent = '✕'; del.disabled = busy();
+  del.addEventListener('click', () => {
+    steps.splice(index, 1); save(); render();
+  });
+
+  const bp = document.createElement('button');
+  bp.className = 'bp' + (step.break ? ' on' : '');
+  bp.title = step.break ? '这一行有断点（点一下取消）' : '在这里下断点';
+  bp.textContent = '●';
+  bp.disabled = busy();
+  bp.addEventListener('click', () => {
+    steps[index].break = !steps[index].break;
+    save(); render();
+  });
+
+  card.append(bp, idx, type, fields(step, index), plus, up, down, del);
+  wrap.append(card);
+  return wrap;
+}
+
+function render() {
+  const flow = $('flow');
+  flow.replaceChildren();
+  steps.forEach((step, index) => flow.append(stepCard(step, index)));
+  for (const id of ['play', 'send', 'session', 'reset', 'add', 'refresh']) $(id).disabled = busy();
+  if (busy() && recording === 'session') {
+    $('logs').textContent = '整段录制中：在微信里正常操作，按 Esc 结束…';
+  }
+}
+
+let polling = null;
+function setRunActive(value) {
+  if (runActive === value) return;
+  runActive = value;
+  render();
+}
+function pollProgress() {
+  clearInterval(polling);
+  polling = setInterval(async () => {
+    let p;
+    try { p = await fetch('/api/progress').then((r) => r.json()); } catch { return; }
+    if (p.logs && p.logs.length) $('logs').textContent = p.logs.join('\n');
+    if (p.pausedAt) {
+      $('paused').classList.add('show');
+      $('pausedText').textContent = `已暂停在第 ${p.pausedAt} 步${p.pausedStep ? `（${p.pausedStep.type}）` : ''}`;
+    } else {
+      $('paused').classList.remove('show');
+    }
+    if (!p.active) { clearInterval(polling); polling = null; $('paused').classList.remove('show'); }
+    setRunActive(Boolean(p.active));
+  }, 400);
+}
+
+async function run(kind) {
+  $('logs').textContent = kind === 'play' ? '演练中…' : '发送中…';
+  setRunActive(true);
+  pollProgress();
+  const result = await call(kind === 'play' ? '/api/play' : '/api/send');
+  const lines = (result.logs || []).join('\n');
+  $('logs').textContent = result.ok
+    ? `${lines}\n${result.result && result.result.aborted ? '已按断点中止' : (kind === 'play' ? '演练完成（没有发送）' : '发送完成')}`
+    : `${lines}\n失败：${result.error}
+（点右上角「日志」看完整记录）`;
+  toast(result.ok ? '完成' : '失败');
+}
+
+// ---- 流程库：存一份 / 读回来 / 删掉，还能导出成文件带走 ----
+let flowList = [];
+
+function renderFlows() {
+  const pick = $('flowPick');
+  const keep = pick.value;
+  pick.replaceChildren();
+  if (!flowList.length) {
+    pick.append(new Option('（没有存过的流程）', ''));
+    pick.disabled = true;
+    return;
+  }
+  pick.disabled = false;
+  pick.append(new Option('（选择已保存的流程）', ''));
+  for (const flow of flowList) {
+    const when = flow.savedAt ? new Date(flow.savedAt).toLocaleString() : '?';
+    pick.append(new Option(`${flow.name} · ${flow.count} 步 · ${when}`, flow.name));
+  }
+  if (flowList.some((f) => f.name === keep)) pick.value = keep;
+}
+
+async function refreshFlows() {
+  try {
+    const result = await fetch('/api/flows').then((r) => r.json());
+    flowList = result.flows || [];
+  } catch { flowList = []; }
+  renderFlows();
+}
+
+const flowName = () => $('flowName').value.trim() || $('flowPick').value || '';
+
+$('flowSave').addEventListener('click', async () => {
+  const name = flowName();
+  if (!name) { toast('先起个名字'); return; }
+  if (flowList.some((f) => f.name === name) && !confirm(`「${name}」已经存过了，覆盖？`)) return;
+  const result = await call('/api/flows/save', { name, steps });
+  flowList = result.flows || flowList;
+  renderFlows();
+  if (result.ok) { $('flowPick').value = result.name; $('flowName').value = result.name; }
+  toast(result.ok ? `已保存「${result.name}」（${result.count} 步）` : `保存失败：${result.error}`);
+});
+
+$('flowLoad').addEventListener('click', async () => {
+  const name = $('flowPick').value || flowName();
+  if (!name) { toast('先选一个流程'); return; }
+  if (!confirm(`加载「${name}」会替换当前编辑的流程，继续？`)) return;
+  const result = await call('/api/flows/load', { name });
+  if (!result.ok) { toast(`加载失败：${result.error}`); return; }
+  steps = result.steps;
+  $('flowName').value = name;
+  render();
+  refresh();
+  toast(`已加载「${name}」（${steps.length} 步）`);
+});
+
+$('flowDelete').addEventListener('click', async () => {
+  const name = $('flowPick').value || flowName();
+  if (!name) { toast('先选一个流程'); return; }
+  if (!confirm(`删掉「${name}」？文件会直接从 build/flows 里删掉`)) return;
+  const result = await call('/api/flows/delete', { name });
+  flowList = result.flows || flowList;
+  renderFlows();
+  toast(result.ok ? `已删除「${name}」` : `删除失败：${result.error}`);
+});
+
+$('flowExport').addEventListener('click', () => {
+  const payload = { savedAt: new Date().toISOString(), steps };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${(flowName() || 'flow').replace(/[\\/:*?"<>|]/g, '_')}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`已导出 ${steps.length} 步`);
+});
+
+$('flowImport').addEventListener('click', () => $('flowFile').click());
+$('flowFile').addEventListener('change', async () => {
+  const file = $('flowFile').files && $('flowFile').files[0];
+  $('flowFile').value = '';
+  if (!file) return;
+  let data;
+  try { data = JSON.parse((await file.text()).replace(/^﻿/, '')); }
+  catch (error) { toast(`不是合法的 JSON：${error.message}`); return; }
+  const list = Array.isArray(data) ? data : data.steps;
+  if (!Array.isArray(list)) { toast('文件里没有 steps 数组'); return; }
+  const result = await call('/api/save', { steps: list });
+  if (!result.ok) { toast('导入失败'); return; }
+  steps = result.steps;
+  render();
+  toast(`已导入 ${steps.length} 步`);
+});
+
+$('flowPick').addEventListener('change', () => {
+  if ($('flowPick').value) $('flowName').value = $('flowPick').value;
+});
+
+$('refresh').addEventListener('click', refresh);
+$('add').addEventListener('click', async () => {
+  const result = await call('/api/insert', { at: steps.length, type: $('addType').value });
+  if (result.ok) { steps = result.steps; render(); }
+});
+$('reset').addEventListener('click', async () => {
+  const result = await call('/api/reset');
+  steps = result.steps; render(); toast('已恢复默认流程');
+});
+$('session').addEventListener('click', async () => {
+  recording = 'session'; render();
+  const result = await call('/api/record-session');
+  recording = null;
+  if (result.ok) { steps = result.steps; toast(`录到 ${result.count} 步`); }
+  else toast(`录制失败：${result.error}`);
+  render();
+});
+$('log').addEventListener('click', async () => {
+  const result = await fetch('/api/log?tail=120').then((r) => r.json());
+  $('logs').textContent = (result.lines || []).join('\n') || '(日志为空)';
+  toast(`日志：${result.file}`);
+});
+$('resume').addEventListener('click', async () => {
+  await call('/api/resume');
+  $('paused').classList.remove('show');
+});
+$('breakAbort').addEventListener('click', async () => {
+  await call('/api/abort');
+  $('paused').classList.remove('show');
+});
+$('play').addEventListener('click', () => run('play'));
+$('send').addEventListener('click', () => run('send'));
+
+async function refresh() {
+  const state = await fetch('/api/state').then((r) => r.json());
+  renderWindow(state.window, state.recordedWindow);
+  if (!steps.length || !state.recording) steps = state.steps;
+  recording = state.recording;
+  render();
+}
+
+// 页面打开时可能正停在上一次的断点上（比如刷新了页面），把状态接回来
+refresh().then(async () => {
+  await refreshFlows();
+  try {
+    const p = await fetch('/api/progress').then((r) => r.json());
+    if (p.active) { setRunActive(true); pollProgress(); }
+  } catch { /* 服务没起来就不管了 */ }
+});
+</script>
+</body>
+</html>

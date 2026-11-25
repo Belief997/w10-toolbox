@@ -1,0 +1,14 @@
+{
+  "name": "wechat-filehelper",
+  "version": "0.1.0",
+  "description": "把消息发到微信「文件传输助手」：先录坐标，再按坐标回放",
+  "private": true,
+  "main": "src/player.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "studio": "node src/studio-server.js",
+    "record": "node scripts/record.js",
+    "dry-run": "node scripts/dry-run.js",
+    "send": "node scripts/send.js"
+  }
+}
