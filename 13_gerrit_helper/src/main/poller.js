@@ -19,6 +19,7 @@ const { sortCells } = require('../shared/diff');
 const { toBuildCell } = require('../shared/build');
 const { toCell, toEvents } = require('../shared/model');
 const { withRecency } = require('../shared/recency');
+const { muteKey, mutedKeySet } = require('../shared/home-list');
 
 // 前面加 (?<!-) 是为了不把 `-owner:self`（排除）当成"我的"
 const ROLE_PATTERNS = [
@@ -142,7 +143,7 @@ function createPoller({ getConfig, getClient, getJenkins, onCells, logger = cons
     // 链接用**网页**地址：SSH 通道的 base 是 ssh://user@host:29418，拼出来的链接
     // 浏览器打不开（"在 Gerrit 打开"会静默失败）。配置里有 http(s) 地址就用它。
     const webServer = /^https?:\/\//i.test(config.server || '') ? config.server : client.base;
-    const gerritCells = [...changes.values()].map((change) => {
+    const allChangeCells = [...changes.values()].map((change) => {
       const cell = toCell(change, {
         server: webServer,
         selfId,
@@ -151,7 +152,6 @@ function createPoller({ getConfig, getClient, getJenkins, onCells, logger = cons
       cell.events = toEvents(change, 40);
       return cell;
     });
-
     // Jenkins 构建：和 Gerrit change 混排在同一根竖条里。
     // 构建挂了不影响 Gerrit 那部分照常显示。
     const buildCells = [];
@@ -166,7 +166,11 @@ function createPoller({ getConfig, getClient, getJenkins, onCells, logger = cons
       }
     }
 
-    const cells = sortCells([...gerritCells, ...buildCells], config.sort);
+    // 取消订阅的条目：不进竖条（也就不会再弹通知）。主界面要用**未过滤**的列表，
+    // 所以两份都留着 —— allCells 里带 muted 标记的由主界面自己区分
+    const muted = mutedKeySet(config.mutedItems);
+    const allCells = sortCells([...allChangeCells, ...buildCells], config.sort);
+    const cells = allCells.filter((cell) => !muted.has(muteKey(cell.id)));
 
     const authFailed = errors.some((message) => /认证失败|Permission denied|publickey|Unauthorized/i.test(message));
     return {
@@ -176,7 +180,9 @@ function createPoller({ getConfig, getClient, getJenkins, onCells, logger = cons
       errors,
       selfId,
       transport: client?.kind || 'rest',
-      cells
+      cells,
+      // 未过滤的（含已取消订阅的），主界面用
+      allCells
     };
   }
 

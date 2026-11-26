@@ -1185,6 +1185,8 @@ function createDock(options) {
     ipcMain.on('dock:manualRefresh', () => options.onManualRefresh?.());
     ipcMain.on('dock:openSettings', () => options.onOpenSettings?.());
     ipcMain.on('dock:cardSize', (event, payload) => {
+      // 主界面那个"悬浮气泡"复用的是同一套卡片渲染，也会发这个频道 —— 只认自己的卡片窗口
+      if (surfaceOf(event.sender) !== 'card') return;
       const height = Math.round(Number(payload?.height));
       if (!Number.isFinite(height) || height <= 0) return;
       if (height === cardHeight) { showCardIfMeasured(); return; }

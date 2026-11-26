@@ -311,6 +311,9 @@ body[data-edge="bottom"] .card { left: 0; right: 0; top: 0; }
 
 /* 去掉「共 N 条」之后这里不再需要额外的上间距：
    列表 → 8px → 按钮 → 10px（卡片内边距）到边缘，上下基本平衡 */
+/* 主界面的悬浮气泡只是提示，按钮点不着，直接不画 */
+body[data-hover="1"] .card-foot { display: none; }
+
 .card-foot { display: flex; gap: 6px; }
 .card-foot button {
   flex: 1;

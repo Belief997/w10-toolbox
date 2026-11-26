@@ -19,9 +19,13 @@ const { createSshClient, sshAvailable } = require('./gerrit/ssh');
 const { createJenkinsClient } = require('./jenkins/client');
 const { createBackdrop } = require('./backdrop');
 const { createDock } = require('./dock');
+const { roundedRectCommands, toSvgPath } = require('./surfaces');
 const { createPoller } = require('./poller');
 const { createNotifier } = require('./notify');
-const { diffCells } = require('../shared/diff');
+const { diffCells, sortCells } = require('../shared/diff');
+const { muteKey, mutedKeySet, toHomeItem } = require('../shared/home-list');
+const { toCell } = require('../shared/model');
+const { withRecency } = require('../shared/recency');
 const { buildMessageText, shouldSendWeChat } = require('../shared/build-message');
 const { send: sendWeChat } = require('../wechat');
 const { sanitizeImport, summarize, toExportable } = require('../shared/config-io');
@@ -30,6 +34,7 @@ const demo = require('./demo');
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
 const DOCK_PRELOAD = path.join(__dirname, 'preload-dock.js');
 const SETTINGS_PRELOAD = path.join(__dirname, 'preload-settings.js');
+const HOME_PRELOAD = path.join(__dirname, 'preload-home.js');
 const DEMO = process.argv.includes('--demo');
 
 let dock = null;
@@ -39,6 +44,16 @@ let client = null;
 let jenkinsClient = null;
 let tray = null;
 let settingsWindow = null;
+let homeWindow = null;
+// 主界面用：最近一轮**未过滤**的 cells（含已取消订阅的），以及历史 change 的缓存
+let lastAllCells = [];
+let lastPollAt = 0;
+let lastPollOk = true;
+let pastCache = { at: 0, cells: [] };
+// 悬浮气泡：窗口 + 当前贴着的那一行的屏幕矩形 + 渲染层量出来的高度
+let hoverWindow = null;
+let hoverAnchor = null;
+let hoverHeight = 0;
 let demoTimer = null;
 // 启动时刻：设置窗标题栏显示它，用来区分"新实例"和"还在跑的旧实例"
 const STARTED_AT = new Date();
@@ -530,9 +545,21 @@ function notifyWeChatFailed(reason) {
   new Notification({ title: '微信没发出去', body: reason }).show();
 }
 
-function handleCells(cells, result = {}) {
+function handleCells(incoming, result = {}) {
+  // **永远用当前的订阅名单过滤一遍**：轮询是异步的，回来时订阅状态可能已经改了。
+  // 不在这一层兜住的话，刚取消订阅的条目会被上一轮（旧配置）的结果又塞回竖条 ——
+  // 表现就是"主界面和竖条条目数对不上"，而且要等下一轮轮询（最长一分钟）才自己好。
+  const muted = mutedKeySet(store.get().mutedItems);
+  const cells = (Array.isArray(incoming) ? incoming : []).filter((cell) => !muted.has(muteKey(cell.id)));
   const events = diffCells(lastCells, cells);
   lastCells = cells;
+  // 主界面用的列表（含已取消订阅的）；拉取失败（stale）时保留上一轮的
+  if (Array.isArray(result.allCells)) {
+    lastAllCells = result.allCells;
+    lastPollAt = Date.now();
+    lastPollOk = result.ok !== false;
+  }
+  pushHomeState();
   // ok=false：这轮没拉到，面板别把"正在读取"换成"还没有跟踪"
   dock?.setCells(cells, { ok: result.ok !== false });
   // 状态有变化的格子主动弹一次气泡（和通知共用同一套开关）
@@ -633,6 +660,213 @@ function buildDock(previewPatch = null) {
   // 重建出来的 dock 立刻回填现有数据，否则要等下一轮轮询（最多一分钟），
   // 这段时间它就是个"展开后没有项目"的空壳。
   if (lastCells?.length) dock.setCells(lastCells, { seed: true });
+}
+
+// ---- 主界面 --------------------------------------------------------------
+// 托盘右键 →「主界面」。一条一行（一个 change / 一个构建），分「订阅中 / 未订阅」两区。
+// 历史 change（已提交 / 已放弃）不在轮询结果里，窗口打开时单独查一轮并缓存 2 分钟。
+
+function homeItems() {
+  const config = store.get();
+  const muted = mutedKeySet(config.mutedItems);
+  const seen = new Set();
+  const items = [];
+  for (const cell of [...lastAllCells, ...pastCache.cells]) {
+    if (!cell || seen.has(cell.id)) continue;
+    seen.add(cell.id);
+    items.push(toHomeItem(cell, muted));
+  }
+  return items;
+}
+
+function homeState() {
+  const config = store.get();
+  return {
+    items: homeItems(),
+    server: config.server || '',
+    transport: client?.kind || '',
+    updated: lastPollAt,
+    ok: lastPollOk
+  };
+}
+
+function pushHomeState() {
+  if (!homeWindow || homeWindow.isDestroyed()) return;
+  homeWindow.webContents.send('home:state', homeState());
+}
+
+// 历史 change：只在主界面开着时才查，结果缓存 2 分钟
+async function loadPastChanges(force = false) {
+  if (!client) return;
+  if (!force && Date.now() - pastCache.at < 120000) return;
+  const config = store.get();
+  const known = new Set(lastAllCells.map((cell) => cell.id));
+  const cells = [];
+  for (const base of ['owner:self status:merged', 'owner:self status:abandoned']) {
+    const query = withRecency(base, config.recentDays);
+    try {
+      const list = await client.query(query);
+      for (const change of list || []) {
+        const cell = toCell(change, { server: config.server || client.base, selfId: null, role: 'owner' });
+        if (known.has(cell.id)) continue;
+        cell.past = true;
+        cell.events = [];
+        cells.push(cell);
+      }
+      logger.info(`[home] 历史 change：${query} → ${(list || []).length} 条`);
+    } catch (error) {
+      logger.warn(`[home] 查历史 change 失败（${base}）：${error.message}`);
+    }
+  }
+  // 只留最近的 40 条，别把窗口塞满
+  cells.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  pastCache = { at: Date.now(), cells: cells.slice(0, 40) };
+  pushHomeState();
+}
+
+// ---- 主界面的悬浮气泡 ----------------------------------------------------
+// 复用竖条那张卡片的渲染（同一份 dock/index.html?surface=card + dock.css）：
+// 独立的小窗口、置顶、不抢焦点、鼠标穿透，窗口位置贴着主界面那一行的外侧。
+// 形状自己给一个圆角矩形（卡片渲染层靠 dock:shape 画玻璃，没有形状就没有背景）。
+const HOVER_GAP = 8;
+
+function ensureHoverWindow() {
+  if (hoverWindow && !hoverWindow.isDestroyed()) return hoverWindow;
+  hoverWindow = new BrowserWindow({
+    width: 300, height: 180, show: false,
+    frame: false, resizable: false, movable: false, minimizable: false, maximizable: false,
+    fullscreenable: false, skipTaskbar: true, focusable: false, alwaysOnTop: true,
+    hasShadow: false, transparent: true, backgroundColor: '#00000000',
+    type: 'toolbar', thickFrame: false,
+    webPreferences: { preload: DOCK_PRELOAD, contextIsolation: true, nodeIntegration: false }
+  });
+  hoverWindow.setAlwaysOnTop(true, 'pop-up-menu');
+  hoverWindow.setIgnoreMouseEvents(true);
+  hoverWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  hoverWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  // hover=1 让渲染层把底部按钮藏掉（气泡只是提示，窗口是穿透的）
+  hoverWindow.loadFile(path.join(RENDERER_DIR, 'dock', 'index.html'), { query: { surface: 'card', hover: '1' } });
+  // 气泡是提示，不是操作面板：底部按钮由 body[data-hover] 的 CSS 藏掉；
+  // 底色给足（悬浮层那套 0.43 叠在别人的窗口上根本读不清）
+  hoverWindow.webContents.on('did-finish-load', () => {
+    hoverWindow.webContents.send('dock:appearance', { glassAlpha: 92 });
+  });
+  hoverWindow.on('closed', () => { hoverWindow = null; });
+  return hoverWindow;
+}
+
+function placeHoverWindow(height) {
+  if (!hoverWindow || hoverWindow.isDestroyed() || !hoverAnchor) return;
+  const width = Math.round(hoverWindow.getBounds().width);
+  const box = hoverWindow.getBounds();
+  const work = screen.getDisplayNearestPoint({ x: hoverAnchor.x, y: hoverAnchor.y }).workArea;
+  // **优先放到主界面左侧**，左边放不下才翻到右侧
+  const home = homeWindow && !homeWindow.isDestroyed() ? homeWindow.getBounds() : null;
+  let x = (home ? home.x : hoverAnchor.x) - HOVER_GAP - width;
+  if (x < work.x + 4) {
+    x = home ? home.x + home.width + HOVER_GAP : hoverAnchor.x + hoverAnchor.width + HOVER_GAP;
+  }
+  x = Math.max(work.x + 4, Math.min(x, work.x + work.width - width - 4));
+  let y = hoverAnchor.y;
+  y = Math.max(work.y + 4, Math.min(y, work.y + work.height - height - 4));
+  hoverWindow.setBounds({ x: Math.round(x), y: Math.round(y), width, height: Math.round(height) });
+  // 形状：圆角矩形（卡片渲染层拿它画玻璃，也是窗口 region）
+  const commands = roundedRectCommands({ width, height, radius: 12, inset: 0.5 });
+  hoverWindow.webContents.send('dock:shape', {
+    d: toSvgPath(commands),
+    outline: toSvgPath(commands.filter(([op]) => op !== 'Z')),
+    width, height
+  });
+}
+
+function showHover(payload) {
+  const cell = lastAllCells.find((item) => item.id === String(payload?.id || ''));
+  const rect = payload?.rect;
+  if (!cell || !rect || !homeWindow || homeWindow.isDestroyed()) return;
+  const bounds = homeWindow.getBounds();
+  hoverAnchor = {
+    x: bounds.x + Math.round(rect.x),
+    y: bounds.y + Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height)
+  };
+  const win = ensureHoverWindow();
+  const show = () => {
+    if (!hoverAnchor || win.isDestroyed()) return;
+    const height = Math.max(80, Math.min(420, hoverHeight || 160));
+    placeHoverWindow(height);
+    if (!win.isVisible()) win.showInactive();
+    win.webContents.send('card:cell', { cell, side: 'right' });
+  };
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', show);
+  else show();
+}
+
+function hideHover() {
+  hoverAnchor = null;
+  if (hoverWindow && !hoverWindow.isDestroyed() && hoverWindow.isVisible()) hoverWindow.hide();
+}
+
+function openHome() {
+  if (homeWindow && !homeWindow.isDestroyed()) {
+    homeWindow.show();
+    homeWindow.focus();
+    return;
+  }
+  homeWindow = new BrowserWindow({
+    width: 520, height: 560, minWidth: 420, minHeight: 380,
+    title: 'Gerrit Helper · 订阅',
+    frame: false, transparent: true, hasShadow: false,
+    backgroundColor: '#00000000', autoHideMenuBar: true, show: false,
+    webPreferences: {
+      preload: HOME_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  homeWindow.setMenuBarVisibility(false);
+  homeWindow.loadFile(path.join(RENDERER_DIR, 'home', 'index.html'));
+  homeWindow.once('ready-to-show', () => homeWindow.show());
+  homeWindow.on('closed', () => { homeWindow = null; });
+  loadPastChanges();
+}
+
+function registerHomeIpc() {
+  ipcMain.handle('home:load', () => homeState());
+  // 订阅 / 取消订阅：按**条目**（cell id）记账，不是按仓库
+  ipcMain.handle('home:toggle', (event, payload) => {
+    const id = String(payload?.id || '').trim();
+    if (!id) return { ok: false, error: '没有条目 id' };
+    const muted = new Set(store.get().mutedItems || []);
+    const subscribe = payload?.tracked === true;
+    // 名单里存完整 id；比对时看 key（见 shared/home-list.js 的 muteKey）
+    const key = muteKey(id);
+    for (const existing of [...muted]) if (muteKey(existing) === key) muted.delete(existing);
+    if (!subscribe) muted.add(id);
+    store.save({ mutedItems: [...muted] });
+    logger.info(`[home] ${subscribe ? '订阅' : '取消订阅'} ${id}`);
+    // **先按新名单过滤上一轮的数据推给竖条**，不等下一次轮询 ——
+    // SSH 一轮要 1~3 秒，等它回来才有反应的话，点一下要愣好几秒
+    handleCells(sortCells(lastAllCells, store.get().sort), { ok: lastPollOk });
+    restartPipeline();
+    pushHomeState();
+    return { ok: true, muted: [...muted] };
+  });
+  ipcMain.on('home:refresh', () => {
+    poller?.pollNow();
+    loadPastChanges(true);
+  });
+  ipcMain.on('home:close', () => { hideHover(); homeWindow?.close(); });
+  ipcMain.on('home:hover', (event, payload) => showHover(payload));
+  ipcMain.on('home:unhover', () => hideHover());
+  // 气泡窗口的高度由渲染层量出来（和竖条卡片同一条路）
+  ipcMain.on('dock:cardSize', (event, payload) => {
+    if (!hoverWindow || event.sender !== hoverWindow.webContents) return;
+    const height = Math.round(Number(payload?.height));
+    if (!Number.isFinite(height) || height <= 0) return;
+    hoverHeight = height;
+    placeHoverWindow(height);
+  });
 }
 
 // ---- 设置窗口 ------------------------------------------------------------
@@ -983,6 +1217,7 @@ function buildTray() {
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
   tray.setToolTip('Gerrit Helper');
   const menu = Menu.buildFromTemplate([
+    { label: '主界面', click: openHome },
     { label: '立即刷新', click: () => poller?.pollNow() },
     { label: '保存诊断快照 (Ctrl+Alt+D)', click: () => diagnose() },
     { label: '设置…', click: openSettings },
@@ -1041,6 +1276,7 @@ if (LOCKED && !app.requestSingleInstanceLock()) {
     backdrop = createBackdrop({ app, screen, logger });
     logger.info(`start demo=${DEMO} pid=${process.pid} log=${logger.file}`);
     registerSettingsIpc();
+    registerHomeIpc();
     notifier = createNotifier({
       getConfig: store.get,
       onClick: (event) => openUrl(event?.url)
@@ -1082,6 +1318,101 @@ if (LOCKED && !app.requestSingleInstanceLock()) {
         } catch (error) {
           logger.warn(`[log-smoke] 失败：${error.message}`);
           app.exit(1);
+        }
+      }, 8000);
+    }
+
+    // 自检用：--home-smoke 打开主界面，dump 分区和每一行，然后点第一个"跟踪中"
+    // 把它取消跟踪，确认配置真的写进去、行也挪到了「未跟踪」区。
+    const homeShowOnly = process.argv.includes('--home-smoke=show');
+    if (process.argv.includes('--home-smoke') || homeShowOnly) {
+      setTimeout(async () => {
+        try {
+          openHome();
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          const read = () => homeWindow.webContents.executeJavaScript(`(() => ({
+            meta: document.getElementById('meta')?.textContent || '',
+            groups: [...document.querySelectorAll('.group')].map((g) => ({
+              title: g.querySelector('.group-title')?.textContent,
+              count: g.querySelector('.group-count')?.textContent,
+              rows: [...g.querySelectorAll('.item')].map((r) => ({
+                name: r.querySelector('.item-name')?.textContent,
+                subject: r.querySelector('.item-subject')?.textContent,
+                meta: r.querySelector('.item-meta')?.textContent,
+                action: r.querySelector('.item-action')?.textContent,
+                past: r.dataset.past,
+                updated: r.dataset.updated
+              }))
+            }))
+          }))()`);
+          const railLabels = async () => (await dock.debugRail?.())?.labels || [];
+          logger.info(`[home-smoke] 打开前 ${JSON.stringify(await read())}`);
+          logger.info(`[home-smoke] 竖条（改前）${JSON.stringify(await railLabels())}`);
+          const before = await read();
+          const target = homeShowOnly ? null : (before.groups[0]?.rows || [])[0];
+          if (target) {
+            // 故意制造竞争：先踢一脚轮询，趁它还在飞就点"取消订阅" ——
+            // 这正是"两侧条目数对不上"的触发条件
+            poller?.pollNow();
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            await homeWindow.webContents.executeJavaScript(
+              "document.querySelector('.group .item .item-action')?.click()"
+            );
+            // 150ms 就读竖条：一次 SSH 轮询要 1~3 秒，能在这时候就变说明是就地过滤的
+            await new Promise((resolve) => setTimeout(resolve, 150));
+            logger.info(`[home-smoke] 竖条（改后 150ms）${JSON.stringify(await railLabels())}`);
+            await new Promise((resolve) => setTimeout(resolve, 650));
+            logger.info(`[home-smoke] 取消订阅 ${target.name} → muted=${JSON.stringify(store.get().mutedItems)}`);
+            logger.info(`[home-smoke] 之后 ${JSON.stringify(await read())}`);
+            // 悬浮气泡：派发 mouseenter，然后看**另一个窗口**里画了什么
+            await homeWindow.webContents.executeJavaScript(
+              "document.querySelector('.group .item')?.dispatchEvent(new MouseEvent('mouseenter'))"
+            );
+            await new Promise((resolve) => setTimeout(resolve, 700));
+            const pop = hoverWindow && !hoverWindow.isDestroyed()
+              ? await hoverWindow.webContents.executeJavaScript(`(() => ({
+                title: document.querySelector('.card-project')?.textContent || '',
+                subject: document.querySelector('.card-subject')?.textContent || '',
+                meta: document.querySelector('.card-meta')?.textContent || '',
+                events: [...document.querySelectorAll('.event-text')].map((el) => el.textContent),
+                buttons: [...document.querySelectorAll('.card-foot button')].map((el) => getComputedStyle(el).display)
+              }))()`).catch((error) => `(读取失败: ${error.message})`)
+              : null;
+            // 等一整轮轮询跑完，确认两侧条目数一致（之前会在这里对不上）
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+            const railAfter = await railLabels();
+            const settled = await read();
+            const subscribed = Number(settled.groups?.[0]?.count || 0);
+            logger.info(`[home-smoke] 轮询一圈后：竖条 ${railAfter.length} 格 / 主界面订阅 ${subscribed} 条`
+              + ` → ${railAfter.length === subscribed ? '一致' : '不一致'}`);
+            logger.info(`[home-smoke] 气泡窗口=${JSON.stringify(hoverWindow?.getBounds?.() || null)} 内容=${JSON.stringify(pop)}`);
+          }
+          await diagnose();
+        } catch (error) {
+          logger.warn(`[home-smoke] 失败：${error.message}`);
+        } finally {
+          app.exit(0);
+        }
+      }, 9000);
+    }
+
+    // 自检用：--hover-smoke 打开主界面、悬停第一行，然后**在气泡还显示着的时候**截图
+    if (process.argv.includes('--hover-smoke')) {
+      setTimeout(async () => {
+        try {
+          openHome();
+          await new Promise((resolve) => setTimeout(resolve, 2600));
+          await homeWindow.webContents.executeJavaScript(
+            "document.querySelector('.group .item')?.dispatchEvent(new MouseEvent('mouseenter'))"
+          );
+          await new Promise((resolve) => setTimeout(resolve, 900));
+          logger.info(`[hover-smoke] 气泡=${JSON.stringify(hoverWindow?.getBounds?.() || null)}`
+            + ` 主界面=${JSON.stringify(homeWindow?.getBounds?.() || null)}`);
+          await diagnose();
+        } catch (error) {
+          logger.warn(`[hover-smoke] 失败：${error.message}`);
+        } finally {
+          app.exit(0);
         }
       }, 8000);
     }

@@ -1,0 +1,226 @@
+/* 主界面。风格沿用 token-monitor：深玻璃外壳 + 等宽字 + 分区列表。
+   注意：**不画外投影、不留外圈透明边** —— 透明窗口里 CSS 阴影会在窗口边界被硬切，
+   看起来是一圈黑框（设置窗踩过同一个坑，见 settings.css 顶部那条注释）。 */
+
+:root {
+  color-scheme: dark;
+  --glass-rgb: 20, 24, 30;
+  --overlay-rgb: 255, 255, 255;
+  --line-rgb: 232, 238, 244;
+  --text: #eef5fb;
+  --muted: #a3adbb;
+  --accent: #b7ead4;
+  --accent-rgb: 183, 234, 212;
+  --red: #f29a8c;
+  --orange: #e8c27a;
+  --line: rgba(var(--line-rgb), 0.16);
+  --line-soft: rgba(var(--line-rgb), 0.08);
+  --ui-font: ui-monospace, "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--ui-font);
+  font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+  background-color: rgba(18, 22, 28, 0.99);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 42%);
+  border: 1px solid var(--line);
+}
+
+/* ---- 标题栏 -------------------------------------------------------------- */
+
+.titlebar {
+  flex: 0 0 auto;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 13px;
+  border-bottom: 1px solid var(--line-soft);
+  -webkit-app-region: drag;
+}
+.titlebar-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+}
+.titlebar-name { font-size: 11.5px; font-weight: 650; letter-spacing: -0.01em; }
+.titlebar-sep { color: var(--muted); }
+.titlebar-sub { font-size: 11px; color: var(--muted); }
+
+.tb-btn {
+  -webkit-app-region: no-drag;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.tb-btn:hover { background: rgba(var(--overlay-rgb), 0.1); color: var(--text); }
+.tb-btn:first-of-type { margin-left: auto; }
+.tb-close:hover { background: rgba(242, 154, 140, 0.18); color: var(--red); }
+
+/* ---- 摘要 ---------------------------------------------------------------- */
+
+.meta {
+  flex: 0 0 auto;
+  padding: 7px 13px 6px;
+  font-size: 10.5px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line-soft);
+  font-variant-numeric: tabular-nums;
+}
+.meta b { color: var(--text); font-weight: 650; }
+
+/* ---- 列表 ---------------------------------------------------------------- */
+
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  padding: 2px 0 10px;
+}
+
+.group + .group { margin-top: 4px; }
+
+/* 分区头：一条矮标题 + 计数 + 右侧说明 */
+.group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 9px 13px 4px;
+}
+.group-title {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  text-transform: uppercase;
+}
+.group-count {
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.group-hint { margin-left: auto; font-size: 10px; color: var(--muted); }
+
+.items { list-style: none; display: flex; flex-direction: column; }
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 13px 6px 11px;
+  border-top: 1px solid var(--line-soft);
+  transition: background-color 120ms ease;
+}
+.item:hover { background: rgba(var(--overlay-rgb), 0.05); }
+
+/* 左边那颗小点：颜色就是竖条上圆环的颜色（状态一眼对上） */
+.item-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dot-color, var(--muted));
+  align-self: flex-start;
+  margin-top: 5px;
+}
+
+.item-main { min-width: 0; flex: 1 1 auto; }
+.item-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.item-name {
+  font-size: 11.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-mark {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.item-subject {
+  margin-top: 1px;
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-meta {
+  margin-top: 1px;
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-meta .warn { color: var(--orange); }
+.item-meta .bad { color: var(--red); }
+
+/* 未订阅 / 历史条目压暗，和"在用的"区分开 */
+.item[data-tracked="false"] .item-name { color: var(--muted); }
+.item[data-past="true"] { opacity: 0.72; }
+
+.item-action {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 10px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.item-action:hover { background: rgba(var(--overlay-rgb), 0.1); color: var(--text); }
+/* data-on=1 = 现在"未订阅"，按钮是主操作（订阅） */
+.item-action[data-on="1"] {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+.item-action[data-on="1"]:hover { background: rgba(var(--accent-rgb), 0.16); }
+
+.empty {
+  padding: 12px 13px;
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.7;
+}

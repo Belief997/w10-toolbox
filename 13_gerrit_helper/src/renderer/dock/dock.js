@@ -13,6 +13,8 @@
   const RING_C = 2 * Math.PI * RING_R;
 
   document.body.dataset.surface = surface;
+  // 主界面的悬浮气泡复用同一页渲染，但它只是提示（窗口穿透）：底部按钮藏掉
+  if (new URLSearchParams(location.search).get('hover') === '1') document.body.dataset.hover = '1';
   if (!api) return;
 
   // ---- 形状 --------------------------------------------------------------

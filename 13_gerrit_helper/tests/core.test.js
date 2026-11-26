@@ -182,6 +182,45 @@ test('jenkins.logDir 默认空串（= 程序目录下的 build_log），原样�
   assert.strictEqual(normalize({ jenkins: { url: 'x' } }).jenkins.logDir, '');
 });
 
+test('mutedItems 去空白、丢空串', () => {
+  assert.deepStrictEqual(normalize({}).mutedItems, [], '默认没有');
+  assert.deepStrictEqual(
+    normalize({ mutedItems: [' https://g/x|10231 ', '', '  ', 'build|Job'] }).mutedItems,
+    ['https://g/x|10231', 'build|Job']
+  );
+  assert.deepStrictEqual(normalize({ mutedItems: 'x' }).mutedItems, [], '不是数组就当没有');
+});
+
+test('主界面按"一条 change / 一个构建"列出，不是按仓库', () => {
+  const { muteKey, mutedKeySet, toHomeItem, splitItems } = require('../src/shared/home-list');
+  const changeCell = {
+    id: 'https://g/gerrit|10231', kind: 'change', projectShort: 'base', label: '#10231',
+    subject: 'Fix Wi-Fi handover stall', patchset: 6, votes: { cr: 1 }, status: 'NEW',
+    tone: 'normal', updated: 200
+  };
+  const pastCell = { ...changeCell, id: 'https://g/gerrit|263100', label: '#263100', status: 'MERGED', patchset: 3, updated: 100, past: true };
+  const buildCell = {
+    id: 'build|ReleaseBuild~x', kind: 'build', job: 'ReleaseBuild~x', label: '#268',
+    subject: 'ReleaseBuild · FAILURE', state: 'FAILURE', tone: 'bad', updated: 300
+  };
+  // 名单里存完整 id，比对时看 key —— 服务器地址变了也不会失效
+  assert.strictEqual(muteKey('https://h/gerrit|10231'), '10231');
+  assert.strictEqual(muteKey('build|ReleaseBuild~x'), 'ReleaseBuild~x');
+  const muted = mutedKeySet([buildCell.id]);
+  const items = [changeCell, pastCell, buildCell].map((cell) => toHomeItem(cell, muted));
+
+  assert.strictEqual(items[0].title, 'base #10231');
+  assert.strictEqual(items[0].meta, 'PS 6 · CR +1 · 进行中');
+  assert.strictEqual(items[1].past, true, '历史的 change 标 past，主界面压暗');
+  assert.strictEqual(items[2].title, 'ReleaseBuild~x #268');
+  assert.strictEqual(items[2].meta, '失败', '构建状态也走中文');
+  assert.strictEqual(items[2].tracked, false, '被取消订阅的条目标未订阅');
+
+  const groups = splitItems(items);
+  assert.deepStrictEqual(groups.tracked.map((item) => item.id), [changeCell.id, pastCell.id], '历史沉到下面');
+  assert.deepStrictEqual(groups.muted.map((item) => item.id), [buildCell.id]);
+});
+
 test('keepAwake 默认开（阻止休眠和息屏），只有显式 false 才算关', () => {
   assert.strictEqual(normalize({}).keepAwake, true, '默认阻止');
   assert.strictEqual(normalize({}).keepAwake, true, '旧配置没这个字段也算开');
@@ -199,24 +238,24 @@ test('wechat 默认关闭，enabled 只认 true，flow 去空白', () => {
 test('卡片链接必须是浏览器打得开的地址（SSH 通道的 base 要转成 https）', () => {
   // 走 SSH 时 client.base 是 ssh://user@host:29418 —— 直接拼链接会被 https 白名单挡掉，
   // 表现就是"在 Gerrit 打开"点了没反应
-  assert.strictEqual(webBase('ssh://roy_xie@cn4soc.rtkbf.com:29418'), 'https://cn4soc.rtkbf.com');
+  assert.strictEqual(webBase('ssh://alice@gerrit.example.com:29418'), 'https://gerrit.example.com');
   assert.strictEqual(webBase('ssh://host:29418'), 'https://host', '没有用户名也要认');
-  assert.strictEqual(webBase('https://cn4soc.rtkbf.com/'), 'https://cn4soc.rtkbf.com', '去掉尾斜杠');
+  assert.strictEqual(webBase('https://gerrit.example.com/'), 'https://gerrit.example.com', '去掉尾斜杠');
   assert.strictEqual(webBase(''), '', '空串还是空串');
   assert.strictEqual(webBase('http://10.0.0.5:8080'), 'http://10.0.0.5:8080', 'http 原样保留');
 
   const cell = toCell(
-    { _number: 263241, project: 'HoneyRepo/lvgl', status: 'NEW', labels: {} },
-    { server: 'ssh://roy_xie@cn4soc.rtkbf.com:29418' }
+    { _number: 10231, project: 'platform/frameworks/base', status: 'NEW', labels: {} },
+    { server: 'ssh://alice@gerrit.example.com:29418' }
   );
-  assert.strictEqual(cell.url, 'https://cn4soc.rtkbf.com/c/HoneyRepo/lvgl/+/263241');
+  assert.strictEqual(cell.url, 'https://gerrit.example.com/c/platform/frameworks/base/+/10231');
 
   // 网页入口在子路径下（这台 Gerrit 是 https://host/gerrit/）时，前缀要跟着走
   const prefixed = toCell(
-    { _number: 263241, project: 'HoneyRepo/lvgl', status: 'NEW', labels: {} },
+    { _number: 10231, project: 'platform/frameworks/base', status: 'NEW', labels: {} },
     { server: 'https://host/gerrit' }
   );
-  assert.strictEqual(prefixed.url, 'https://host/gerrit/c/HoneyRepo/lvgl/+/263241');
+  assert.strictEqual(prefixed.url, 'https://host/gerrit/c/platform/frameworks/base/+/10231');
 });
 
 test('normalize 收敛非法配置', () => {

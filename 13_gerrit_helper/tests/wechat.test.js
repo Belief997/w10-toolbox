@@ -51,10 +51,10 @@ test('流程文件裸数组和 {steps} 都认', () => {
 
 const BUILD_CELL = {
   kind: 'build',
-  id: 'build|ReleaseBuild~HoneyComb~bb2Ultra~Acut',
-  job: 'ReleaseBuild~HoneyComb~bb2Ultra~Acut',
+  id: 'build|ReleaseBuild~Demo~boardX~Arbitrary',
+  job: 'ReleaseBuild~Demo~boardX~Arbitrary',
   number: 266,
-  url: 'https://jks.example.com/job/ReleaseBuild~HoneyComb~bb2Ultra~Acut/266/',
+  url: 'https://jks.example.com/job/ReleaseBuild~Demo~boardX~Arbitrary/266/',
   stages: [
     { name: 'Release Patch', status: 'SUCCESS' },
     { name: 'Checkout Code', status: 'SUCCESS' },
@@ -74,15 +74,15 @@ test('只有跑完/卡住的状态才发，跑着的不发', () => {
 test('文案带上构建号、job 全名、出事的步骤和链接', () => {
   const text = buildMessageText(BUILD_CELL, 'FAILURE');
   const lines = text.split('\n');
-  assert.strictEqual(lines[0], '【构建失败】bb2Ultra~Acut #266');
-  assert.strictEqual(lines[1], 'ReleaseBuild~HoneyComb~bb2Ultra~Acut');
+  assert.strictEqual(lines[0], '【构建失败】boardX~Arbitrary #266');
+  assert.strictEqual(lines[1], 'ReleaseBuild~Demo~boardX~Arbitrary');
   assert.strictEqual(lines[2], '出事的步骤：Keil Build', '别只写"构建失败"，还得让人知道挂在哪一步');
   assert.strictEqual(lines[3], BUILD_CELL.url);
 });
 
 test('成功时不说"出事的步骤"', () => {
   const ok = buildMessageText({ ...BUILD_CELL, stages: [{ name: 'Keil Build', status: 'SUCCESS' }] }, 'SUCCESS');
-  assert.match(ok, /^【构建成功】bb2Ultra~Acut #266/);
+  assert.match(ok, /^【构建成功】boardX~Arbitrary #266/);
   assert.doesNotMatch(ok, /出事的步骤/);
 });
 

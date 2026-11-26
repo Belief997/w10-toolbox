@@ -29,7 +29,7 @@ function blameStage(cell) {
 function buildMessageText(cell, state) {
   const title = SEND_STATES[state] || String(state);
   const job = String(cell?.job || '');
-  // job 名形如 ReleaseBuild~HoneyComb~bb2Ultra~Acut：只留最后两段当标题，
+  // job 名形如 ReleaseBuild~Demo~boardX~Arbitrary：只留最后两段当标题，
   // 全名放在第二行（竖条上那种只取最后一段的写法，在消息里看不出是哪个板子）
   const parts = job.split('~').filter(Boolean);
   const short = parts.slice(-2).join('~') || job;

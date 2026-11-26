@@ -17,7 +17,7 @@ function shortProject(project) {
   return parts[parts.length - 1] || project || '?';
 }
 
-// 项目路径：`HoneyRepo/lvgl` 保持斜杠，只编码每一段（空格、中文这些）
+// 项目路径：`platform/frameworks/base` 保持斜杠，只编码每一段（空格、中文这些）
 function projectPath(project) {
   return String(project || '').split('/').map(encodeURIComponent).join('/');
 }

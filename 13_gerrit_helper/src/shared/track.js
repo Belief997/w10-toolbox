@@ -8,6 +8,9 @@ const DEFAULTS = Object.freeze({
   intervalSec: 60,
   // [{ kind: 'change'|'query', ref: '10231' | 'reviewer:self is:open' }]
   track: [],
+  // 不订阅的条目：cell id（change 是 `<base>|<编号>`，构建是 `build|<job>`）。
+  // 命中的不进竖条、不弹通知；但仍然列在主界面的「未订阅」区里，随时能放回来
+  mutedItems: [],
   // always = 竖条常驻；autoHide = 只在光标靠边时露出
   mode: 'always',
   // 吸附到屏幕边缘；关掉后可以拖到任意位置
@@ -110,6 +113,9 @@ function normalize(config) {
   next.wechat = { enabled: wechat.enabled === true, flow: String(wechat.flow || '').trim() };
   next.scanRoots = (Array.isArray(next.scanRoots) ? next.scanRoots : [])
     .map((dir) => String(dir).trim())
+    .filter(Boolean);
+  next.mutedItems = (Array.isArray(next.mutedItems) ? next.mutedItems : [])
+    .map((id) => String(id).trim())
     .filter(Boolean);
   next.track = (Array.isArray(next.track) ? next.track : [])
     .map((item) => (typeof item === 'string' ? parseTrackLine(item) : item))

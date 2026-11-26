@@ -95,7 +95,7 @@ ssh -o BatchMode=yes -o ConnectTimeout=8 -p 29418 user@host     gerrit query --f
 两条查询各约 500ms，合成的竖条数据正确。
 
 > **服务器地址要带网页入口的路径前缀。** Gerrit 的网页可能在子路径下
-> （这台是 `https://cn4soc.rtkbf.com/gerrit`，根路径 `https://cn4soc.rtkbf.com` 是 nginx 默认页）。
+> （这台是 `https://gerrit.example.com/gerrit`，根路径 `https://gerrit.example.com` 是 nginx 默认页）。
 > 少了 `/gerrit`，卡片上的链接全是 404 —— 而且因为走 SSH 通道，REST 那条路一直没被用到，
 > 这个错就一直没暴露。项目名里的 `/` 也不能整体 `encodeURIComponent`（会变成 `%2F`，
 > 链接同样打不开），现在是按路径段编码。
@@ -233,7 +233,7 @@ Jenkins 给的是纯文本接口 `/job/<job>/<构建号>/consoleText`，和前�
 命令行也能下，跑完退出，用来做自检或批量取日志：
 
 ```bash
-electron . "--download-console=ReleaseBuild~HoneyComb~bb2Ultra~Acut/266"
+electron . "--download-console=ReleaseBuild~Demo~boardX~Arbitrary/266"
 ```
 
 日志落在**设置 → 构建 → 控制台日志下载目录**，留空就是程序目录下的 `build_log`
@@ -294,10 +294,10 @@ Jenkins 那边"跑完了 / 卡住了"→ 发一条微信。设置 → 通知 →
 `IN_PROGRESS` 不发 —— 否则每分钟一轮轮询都会命中一次状态迁移。文案长这样：
 
 ```
-【构建失败】bb2Ultra~Acut #266
-ReleaseBuild~HoneyComb~bb2Ultra~Acut
+【构建失败】boardX~Arbitrary #266
+ReleaseBuild~Demo~boardX~Arbitrary
 出事的步骤：Keil Build
-https://cn4soc-jks.rtkbf.com/job/ReleaseBuild~HoneyComb~bb2Ultra~Acut/266/
+https://jks.example.com/job/ReleaseBuild~Demo~boardX~Arbitrary/266/
 ```
 
 **一次只发一条。** 回放会把微信拽到前台再模拟点击，两条并行会互相点飞，所以走队列
@@ -342,6 +342,7 @@ src/
 │   ├── ps.js          PowerShell 薄封装
 │   └── win.ps1        窗口 / 焦点 / 点击 / 按键 / 剪贴板 / hit-test
 ├── renderer/
+│   ├── home/          主界面（托盘右键 →「主界面」，管"跟踪哪些项目"）
 │   ├── dock/          悬浮层（三块 surface 共用一页）
 │   └── settings/      设置窗
 └── motion/          弹簧采样 + 数字滚动（见下）
@@ -586,6 +587,54 @@ electron . --open-smoke        # 挪光标到卡片「在 Gerrit 打开」上真
 
 正常是 3 个（rail / handle / card）+ 可能存在的设置窗。`owned=false` 的窗口就是
 孤儿 —— 不受 dock 管理、会一直停在屏幕上。看到这个数字超过 4 就说明有窗口泄漏。
+
+## 主界面：订阅哪些条目
+
+托盘右键 → **主界面**（520px 宽的小窗，风格沿用 token-monitor：深玻璃 + 等宽字 + 分区列表）。
+**一条一行 = 一个 change 或一个构建，不按仓库聚合。** 分三区：
+
+| 区 | 内容 | 进竖条？ |
+|---|---|---|
+| **订阅中** | 当前打开的 change + Jenkins 构建 | ✅ |
+| **未订阅** | 取消订阅的条目；名字仍然留着，随时放回来 | ❌（也不弹通知） |
+| **历史** | 最近已提交 / 已放弃的 change（压暗、无按钮） | — |
+
+历史那区不在轮询结果里：窗口打开时单独查一轮 `owner:self status:merged` 和
+`status:abandoned`（都套上"最近 N 天"），缓存 2 分钟，最多留 40 条。
+取消订阅写进配置的 `mutedItems: ["<条目 id>", ...]`，主进程在 `poller` 里过滤 ——
+**过滤发生在建事件之前**，所以既不进竖条，也不会触发通知和微信。
+
+条目 id 是 `cell.id`：change 是 `<服务器>|<编号>`，构建是 `build|<job>`。
+
+**订阅状态是落盘的**：写进 `data/config.json` 的 `mutedItems`（和别的配置同一个文件、
+同一个原子写），重启不用重配；导出/导入配置也会带上它（导出的文件不含凭据，但订阅名单是普通配置）。
+
+比对时只看 id 里 `|` 后面那段（change 号 / `build|job`）—— 服务器地址改了、前缀跟着变也不会
+让订阅名单失效（改 `server` 加个 `/gerrit` 这种，前缀是会变的）。
+
+**切换订阅立刻生效**：点完不等下一轮轮询 —— 拿上一轮**未过滤**的 `allCells` 按新名单过滤，
+直接推给竖条。SSH 一轮要 1~3 秒，等它回来的话点一下要愣好几秒（实测改前 3 秒以上，
+改后 150ms 内竖条就少了一格）。
+
+过滤**统一收在 `handleCells` 里**：每次往竖条推数据之前，都拿 `store.get().mutedItems`
+再筛一遍。因为轮询是异步的，回来的时候订阅状态可能已经改了 —— 只在 `poller` 里过滤的话，
+刚取消订阅的条目会被"上一轮（旧配置）的结果"又塞回竖条，表现就是主界面和竖条条目数不一致，
+而且要等下一轮轮询（最长一分钟）才自己好。
+
+**每个分区内部按更新时间倒序**：越近的越靠前，历史区也一样（不是按 change 号）。
+
+**悬浮某一条会弹气泡，而且是窗口外的一个独立小窗**：直接复用竖条那张卡片的渲染
+（同一份 `dock/index.html?surface=card` + `dock.css` + `dock:preload`），所以标题、发起人、
+`PS · CR · CI`、时间线这些长得和竖条里一模一样。
+
+- **优先放主界面左侧**，左边放不下才翻到右边；纵向对齐被悬停的那一行，并夹在工作区内
+- 窗口穿透、不抢焦点，是提示不是面板 —— `?hover=1` 让渲染层把底部那排按钮藏掉
+- 底色单独给到 92（悬浮层那套 0.43 叠在别人的窗口上读不清）
+- 形状是自己发的一份圆角矩形（`dock:shape`），没有尾巴
+- 鼠标离开那一行就收起；主界面重绘 / 关闭时也收起
+
+> 窗口**不画外投影、不留外圈透明边**：透明窗口里 CSS 阴影会在窗口边界被硬切，
+> 看起来是一圈黑框。设置窗踩过同一个坑，两处都去掉了。
 
 ## 锁屏 / 休眠时
 
