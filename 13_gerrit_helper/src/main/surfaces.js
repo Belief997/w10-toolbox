@@ -104,15 +104,28 @@ function transposeTop(commands, across) {
   });
 }
 
+// 底边是把顶边**上下翻过来**（不是转 180°）：鼓包朝下、两端凹肩朝上，
+// 这样它看起来还是"从屏幕边缘长出来的"。
+// (x, y) → (y, x)，同样是宽高互换，所以调用方传的尺寸和顶边一样。
+function transposeBottom(commands) {
+  return commands.map(([op, ...points]) => {
+    const next = [op];
+    for (let index = 0; index < points.length; index += 2) {
+      next.push(points[index + 1], points[index]);
+    }
+    return next;
+  });
+}
+
 // attached = 贴边（带凹肩）；不贴边就是四角圆角。
 // 两者骨架一致，可以直接拿来插值 —— 见 attachedRail 上面的说明。
 function railCommands({ width: w, height: h, side = 'right', shoulder, radius, open = false, attached = true }) {
-  // 顶边吸附：竖条横过来，凹肩落在左右两端（转置前先换宽高）
-  if (side === 'top') {
+  // 顶边/底边吸附：竖条横过来，凹肩落在左右两端（转置前先换宽高）
+  if (side === 'top' || side === 'bottom') {
     const base = attached
       ? attachedRail({ width: h, height: w, shoulder, radius })
       : roundedRectCommands({ width: h, height: w, radius, inset: 1 });
-    const commands = transposeTop(base, h);
+    const commands = side === 'top' ? transposeTop(base, h) : transposeBottom(base);
     return open ? commands.filter(([op]) => op !== 'Z') : commands;
   }
   const commands = attached
@@ -124,10 +137,10 @@ function railCommands({ width: w, height: h, side = 'right', shoulder, radius, o
 
 function peekCommands(options) {
   const { width: w, height: h, side = 'right', open = false } = options;
-  // 顶边：把手是横的，转置过来即可（长度在 width 上）
-  if (side === 'top') {
+  // 顶边/底边：把手是横的，转置过来即可（长度在 width 上）
+  if (side === 'top' || side === 'bottom') {
     const base = peekCommands({ ...options, side: 'right', width: h, height: w });
-    return transposeTop(base, h);
+    return side === 'top' ? transposeTop(base, h) : transposeBottom(base);
   }
   const { handleWidth = w, handleLength = h } = options;
   const x = w - Math.min(handleWidth, w);
@@ -148,11 +161,12 @@ function peekCommands(options) {
 
 function cardCommands(options) {
   const { width, height: h, side = 'right', tail, tailY, neck, radius } = options;
-  // 顶边吸附时卡片在竖条下面，尾巴朝上：把"尾巴在右侧"的形状转置过来。
-  // 转置前宽高互换，tailY 的含义也跟着从"纵向位置"变成"横向位置"。
-  if (side === 'top') {
+  // 横排时卡片在竖条下方（顶边）或上方（底边），尾巴朝竖条：
+  // 把"尾巴在右侧"的形状转置过来。转置前宽高互换，
+  // tailY 的含义也跟着从"纵向位置"变成"横向位置"。
+  if (side === 'top' || side === 'bottom') {
     const base = cardCommands({ ...options, side: 'right', width: h, height: width });
-    return transposeTop(base, h);
+    return side === 'top' ? transposeTop(base, h) : transposeBottom(base);
   }
   const bw = width - tail;
   const tipX = Math.max(bw, width - 1); // 尖端留在窗口内，否则抗锯齿边会被切掉一半

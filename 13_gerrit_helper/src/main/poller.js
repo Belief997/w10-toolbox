@@ -139,9 +139,12 @@ function createPoller({ getConfig, getClient, getJenkins, onCells, logger = cons
       }
     }
 
+    // 链接用**网页**地址：SSH 通道的 base 是 ssh://user@host:29418，拼出来的链接
+    // 浏览器打不开（"在 Gerrit 打开"会静默失败）。配置里有 http(s) 地址就用它。
+    const webServer = /^https?:\/\//i.test(config.server || '') ? config.server : client.base;
     const gerritCells = [...changes.values()].map((change) => {
       const cell = toCell(change, {
-        server: client.base,
+        server: webServer,
         selfId,
         role: roles.get(change._number) || null
       });

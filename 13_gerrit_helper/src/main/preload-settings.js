@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('gerritSettings', {
   testJenkins: (patch) => ipcRenderer.invoke('settings:testJenkins', patch),
   discover: (scanRoots) => ipcRenderer.invoke('settings:discover', scanRoots),
   pickDir: () => ipcRenderer.invoke('settings:pickDir'),
+  pickFlow: () => ipcRenderer.invoke('settings:pickFlow'),
+  testWechat: (patch) => ipcRenderer.invoke('settings:testWechat', patch),
   revealConfig: () => ipcRenderer.send('settings:reveal'),
   exportConfig: () => ipcRenderer.invoke('settings:export'),
   importConfig: () => ipcRenderer.invoke('settings:import'),

@@ -36,6 +36,11 @@
   // 卡片上的「下载日志」按钮，按 cell.id 记一份 —— 主进程下完把结果推回来，
   // 靠它把按钮从"下载中…"改回可点的样子
   const logButtons = new Map();
+  // 手动刷新的状态（idle / running / done / failed）。卡片会被整块重画，
+  // 所以状态存在外面，每次渲染时重新套到新的按钮上。
+  let refreshState = 'idle';
+  let refreshButton = null;
+  let refreshResetTimer = 0;
   let railHeight = 0;
   let slots = [];
   let edge = 'right';
@@ -130,8 +135,8 @@
     });
 
     // 竖条两端本来就是空的凹肩，正好放"上面/下面还有"的箭头
-    // 竖排用上下箭头，横排用左右箭头
-    const horizontal = edge === 'top';
+    // 竖排用上下箭头，横排（顶边/底边吸附）用左右箭头
+    const horizontal = edge === 'top' || edge === 'bottom';
     moreUp = document.createElement('div');
     moreUp.className = 'rail-more';
     moreUp.dataset.dir = 'up';
@@ -356,8 +361,9 @@
     });
     logButtons.set(cell.id, download);
     const refresh = document.createElement('button');
-    refresh.textContent = '刷新';
     refresh.addEventListener('click', () => api.refresh());
+    refreshButton = refresh;
+    paintRefreshState(refresh);
     foot.append(open, download, refresh);
 
     if (flash?.length) card.append(flashStrip(flash));
@@ -491,8 +497,9 @@
     open.textContent = '在 Gerrit 打开';
     open.addEventListener('click', () => api.openUrl(cell.url));
     const refresh = document.createElement('button');
-    refresh.textContent = '刷新';
     refresh.addEventListener('click', () => api.refresh());
+    refreshButton = refresh;
+    paintRefreshState(refresh);
     foot.append(open, refresh);
 
     if (flash?.length) card.append(flashStrip(flash));
@@ -545,6 +552,34 @@
     renderCard(payload.cell, payload.flash);
   });
 
+  // 手动刷新的进度：running 时按钮转圈并禁用，回来之后短暂显示"已更新/刷新失败"。
+  // 状态存在模块里，因为卡片重画会换掉按钮元素。
+  function paintRefreshState(button = refreshButton) {
+    if (!button) return;
+    button.dataset.state = refreshState;
+    button.disabled = refreshState === 'running';
+    button.textContent = refreshState === 'running' ? '刷新中'
+      : refreshState === 'done' ? '已更新'
+        : refreshState === 'failed' ? '刷新失败'
+          : '刷新';
+  }
+
+  api.onRefreshState((payload) => {
+    if (surface !== 'card') return;
+    clearTimeout(refreshResetTimer);
+    if (payload?.state === 'running') {
+      refreshState = 'running';
+    } else {
+      refreshState = payload?.ok === false ? 'failed' : 'done';
+      // 一两秒后回到"刷新"，别让卡片一直写着上一次的结果
+      refreshResetTimer = setTimeout(() => {
+        refreshState = 'idle';
+        paintRefreshState();
+      }, payload?.ok === false ? 2000 : 1200);
+    }
+    paintRefreshState();
+  });
+
   // 日志下载的结果：只改当前这张卡片上的按钮，cellId 对不上（卡片已经换成别的
   // 格子了）就丢掉 —— 不能把别人的结果写在这张卡上
   api.onLogState((payload) => {
@@ -569,7 +604,11 @@
   let press = null;
   let draggedRecently = false;
   window.addEventListener('mousedown', (event) => {
-    if (surface !== 'rail' || event.button !== 0) return;
+    if (event.button !== 0) return;
+    // 竖条整块都能拖着走；卡片也能拖（拖卡片等于拖面板），
+    // 但按在按钮上不算 —— 那是点击，不是拖拽
+    if (surface !== 'rail' && surface !== 'card') return;
+    if (surface === 'card' && event.target?.closest?.('button')) return;
     press = { x: event.screenX, y: event.screenY, moved: false };
   });
   window.addEventListener('mousemove', (event) => {

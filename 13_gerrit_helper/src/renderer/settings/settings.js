@@ -7,6 +7,8 @@
   let saved = {};
   // 日志目录留空时主进程会用的那个路径（只用来做占位提示）
   let defaultLogDir = '';
+  // 微信流程文件留空时主进程会用的那个路径
+  let defaultWechatFlow = '';
 
   // 左栏切换：同一时间只显示一个分栏
   const navItems = [...document.querySelectorAll('.side-item')];
@@ -87,11 +89,15 @@
     $('notifyReview').checked = config.notify?.review !== false;
     $('notifyComment').checked = config.notify?.comment !== false;
     $('notifyPatchset').checked = config.notify?.patchset === true;
+    $('wechatEnabled').checked = config.wechat?.enabled === true;
+    $('wechatFlow').value = config.wechat?.flow || '';
+    $('wechatFlow').placeholder = defaultWechatFlow || '留空 = 同级目录的 14_wechat/build/recorded.json';
     $('scanRoots').value = (config.scanRoots || []).join(NEWLINE);
     const jenkins = config.jenkins || {};
     $('jkUrl').value = jenkins.url || '';
     $('jkUser').value = jenkins.username || '';
     $('jkJobs').value = (jenkins.jobs || []).join(NEWLINE);
+    $('jkAutoLog').checked = jenkins.autoDownloadLog !== false;
     $('jkLogDir').value = jenkins.logDir || '';
     $('jkLogDir').placeholder = defaultLogDir || '留空 = 程序目录下的 build_log';
     // 没存过密码、又检测到 ~/.gitcookies 时，预选 SSO 模式（还得点保存才生效）
@@ -105,6 +111,7 @@
     $('sshKey').value = config.sshKey || '';
     renderDiscovery(discovery);
     $('allowInsecureCert').checked = config.allowInsecureCert === true;
+    $('keepAwake').checked = config.keepAwake !== false;
     $('demoMode').checked = config.demo === true || demo === true;
     setResult($('configPath'), configPath);
   }
@@ -136,7 +143,8 @@
         url: $('jkUrl').value.trim(),
         username: $('jkUser').value.trim(),
         jobs: linesToTrack($('jkJobs').value),
-        logDir: $('jkLogDir').value.trim()
+        logDir: $('jkLogDir').value.trim(),
+        autoDownloadLog: $('jkAutoLog').checked
       },
       notify: {
         cr: $('notifyCr').checked,
@@ -147,7 +155,12 @@
         patchset: $('notifyPatchset').checked
       },
       allowInsecureCert: $('allowInsecureCert').checked,
-      demo: $('demoMode').checked
+      keepAwake: $('keepAwake').checked,
+      demo: $('demoMode').checked,
+      wechat: {
+        enabled: $('wechatEnabled').checked,
+        flow: $('wechatFlow').value.trim()
+      }
     };
   }
 
@@ -371,9 +384,32 @@
     if (result?.ok && result.path) $('jkLogDir').value = result.path;
   });
 
+  // 「选择…」微信流程文件
+  $('wechatFlowPick').addEventListener('click', async () => {
+    const result = await api.pickFlow();
+    if (result?.ok && result.path) $('wechatFlow').value = result.path;
+  });
+
+  // 「发一条测试消息」：真的回放一次，验证流程和坐标。会抢焦点，所以按钮先禁用
+  $('testWechat').addEventListener('click', async () => {
+    const button = $('testWechat');
+    button.disabled = true;
+    setResult($('wechatResult'), '发送中…（微信会被拽到前台）');
+    try {
+      const result = await api.testWechat(collect());
+      if (result.ok) setResult($('wechatResult'), '已发送 ✓', 'ok');
+      else setResult($('wechatResult'), result.error || '发送失败', 'bad');
+    } catch (error) {
+      setResult($('wechatResult'), error.message, 'bad');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   api.load().then(({ config, configPath, demo, discovery, hasPassword, hasJenkinsToken,
-    layers, version, startedAt, logDir }) => {
+    layers, version, startedAt, logDir, wechatFlow }) => {
     defaultLogDir = logDir || '';
+    defaultWechatFlow = wechatFlow || '';
     fill(config, configPath, demo, discovery, { hasPassword, hasJenkinsToken, layers });
     // 标题栏显示版本和启动时刻：一眼看出这个设置窗是不是刚启动的实例
     const stamp = document.querySelector('.titlebar-sub');

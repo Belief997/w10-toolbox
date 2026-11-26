@@ -25,7 +25,7 @@ const DEFAULTS = Object.freeze({
   // 设置窗自身的不透明度（0-100），和悬浮层分开调
   settingsAlpha: 92,
   // Jenkins 构建监控（可选）；logDir 留空 = 程序目录下的 build_log
-  jenkins: { url: '', username: '', jobs: [], logDir: '' },
+  jenkins: { url: '', username: '', jobs: [], logDir: '', autoDownloadLog: true },
   // basic = HTTP password；gitcookies = 复用 ~/.gitcookies 的 SSO 会话；none = 匿名
   authMode: 'basic',
   // auto = 本机有 ssh 就走 SSH，否则回落 REST；ssh = 只用 SSH；rest = 只用 HTTP
@@ -37,8 +37,13 @@ const DEFAULTS = Object.freeze({
   // 自动检测时去这些目录找 .gitreview（深度 ≤3，最多扫 2 秒）
   scanRoots: [],
   notify: { cr: true, status: true, ci: true, review: true, comment: true, patchset: false },
+  // 构建结束发微信（回放 14_wechat 的流程）。flow 留空 = 同级目录 14_wechat/build/recorded.json
+  wechat: { enabled: false, flow: '' },
   allowInsecureCert: false,
-  demo: false
+  demo: false,
+  // 占用"阻止显示器休眠"的电源请求：屏幕不自动关，自动锁屏也就不会来。
+  // 默认**开** —— 无人值守时微信才发得出去；嫌屏幕一直亮着就在设置里关掉。
+  keepAwake: true
 });
 
 // 一行一个跟踪项：纯数字/Change-Id/URL 当 change，带查询关键字或 q: 前缀的当 query
@@ -74,12 +79,16 @@ function normalize(config) {
     jobs: (Array.isArray(jenkins.jobs) ? jenkins.jobs : [])
       .map((job) => String(job).trim()).filter(Boolean),
     // 控制台日志下载目录；空串 = 程序目录下的 build_log（见 main/index.js）
-    logDir: String(jenkins.logDir || '').trim()
+    logDir: String(jenkins.logDir || '').trim(),
+    // 构建失败后自动下控制台日志。默认开（只在显式关掉时才算关）
+    autoDownloadLog: jenkins.autoDownloadLog !== false
   };
   // 旧版本的位置字段，读到时顺手清掉（位置改由 position + snap 表达）
   delete next.offset;
   delete next.side;
   next.snap = next.snap !== false;
+  // 默认开：只有显式关掉（false）才不阻止
+  next.keepAwake = next.keepAwake !== false;
   // edge 记录"贴在哪个边"，顶部吸附要横排，靠它区分 ——
   // 只靠 x/y 猜的话，角上（顶部 + 侧边同时贴合）永远分不清该用哪种形态。
   const pos = next.position;
@@ -88,7 +97,7 @@ function normalize(config) {
     ? {
       x: Math.round(Number(pos.x)),
       y: Math.round(Number(pos.y)),
-      edge: ['top', 'left', 'right'].includes(posEdge) ? posEdge : null
+      edge: ['top', 'bottom', 'left', 'right'].includes(posEdge) ? posEdge : null
     }
     : null;
   next.authMode = ['basic', 'gitcookies', 'none'].includes(next.authMode) ? next.authMode : 'basic';
@@ -97,6 +106,8 @@ function normalize(config) {
   next.sshPort = String(next.sshPort || '29418').trim() || '29418';
   next.sshKey = String(next.sshKey || '').trim();
   next.notify = { ...DEFAULTS.notify, ...(next.notify || {}) };
+  const wechat = next.wechat || {};
+  next.wechat = { enabled: wechat.enabled === true, flow: String(wechat.flow || '').trim() };
   next.scanRoots = (Array.isArray(next.scanRoots) ? next.scanRoots : [])
     .map((dir) => String(dir).trim())
     .filter(Boolean);

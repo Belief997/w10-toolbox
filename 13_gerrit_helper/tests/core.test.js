@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { parseGerritTime, toCell, toEvents } = require('../src/shared/model');
+const { parseGerritTime, toCell, toEvents, webBase } = require('../src/shared/model');
 const { diffCells, sortCells, rank } = require('../src/shared/diff');
 const { parseTrackLine, normalize } = require('../src/shared/track');
 
@@ -41,7 +41,8 @@ test('toCell 归一化出环、色、角标', () => {
   assert.strictEqual(cell.progress, 100);
   assert.strictEqual(cell.mark, '+2');
   assert.strictEqual(cell.tone, 'ready');
-  assert.ok(cell.url.endsWith('/c/platform%2Fframeworks%2Fbase/+/1234'));
+  // 项目名里的斜杠是路径分隔符：整体 encodeURIComponent 会变成 %2F，那条链接打不开
+  assert.ok(cell.url.endsWith('/c/platform/frameworks/base/+/1234'));
 });
 
 test('toCell 认得出 CI 失败和待我评审', () => {
@@ -163,6 +164,14 @@ test('跟踪行能区分 change 和查询', () => {
   assert.strictEqual(parseTrackLine('# 注释'), null);
 });
 
+test('jenkins.autoDownloadLog 默认开，只有显式 false 才算关', () => {
+  assert.strictEqual(normalize({}).jenkins.autoDownloadLog, true, '默认开');
+  assert.strictEqual(normalize({ jenkins: { url: 'x' } }).jenkins.autoDownloadLog, true, '旧配置也是开');
+  assert.strictEqual(normalize({ jenkins: { autoDownloadLog: false } }).jenkins.autoDownloadLog, false);
+  assert.strictEqual(normalize({ jenkins: { autoDownloadLog: 'no' } }).jenkins.autoDownloadLog, true,
+    '只有布尔 false 才算关，字符串不算');
+});
+
 test('jenkins.logDir 默认空串（= 程序目录下的 build_log），原样保留用户填的路径', () => {
   assert.strictEqual(normalize({}).jenkins.logDir, '', '默认留空');
   assert.strictEqual(
@@ -171,6 +180,43 @@ test('jenkins.logDir 默认空串（= 程序目录下的 build_log），原样�
   );
   // 旧配置没有这个字段时不能因为 undefined 变成字符串 "undefined"
   assert.strictEqual(normalize({ jenkins: { url: 'x' } }).jenkins.logDir, '');
+});
+
+test('keepAwake 默认开（阻止休眠和息屏），只有显式 false 才算关', () => {
+  assert.strictEqual(normalize({}).keepAwake, true, '默认阻止');
+  assert.strictEqual(normalize({}).keepAwake, true, '旧配置没这个字段也算开');
+  assert.strictEqual(normalize({ keepAwake: false }).keepAwake, false, '显式关');
+  assert.strictEqual(normalize({ keepAwake: 'no' }).keepAwake, true, '字符串不算关');
+});
+
+test('wechat 默认关闭，enabled 只认 true，flow 去空白', () => {
+  assert.deepStrictEqual(normalize({}).wechat, { enabled: false, flow: '' }, '默认关闭');
+  assert.strictEqual(normalize({ wechat: { enabled: 'true' } }).wechat.enabled, false, '字符串不算开');
+  const on = normalize({ wechat: { enabled: true, flow: '  ../14_wechat/build/recorded.json ' } });
+  assert.deepStrictEqual(on.wechat, { enabled: true, flow: '../14_wechat/build/recorded.json' });
+});
+
+test('卡片链接必须是浏览器打得开的地址（SSH 通道的 base 要转成 https）', () => {
+  // 走 SSH 时 client.base 是 ssh://user@host:29418 —— 直接拼链接会被 https 白名单挡掉，
+  // 表现就是"在 Gerrit 打开"点了没反应
+  assert.strictEqual(webBase('ssh://roy_xie@cn4soc.rtkbf.com:29418'), 'https://cn4soc.rtkbf.com');
+  assert.strictEqual(webBase('ssh://host:29418'), 'https://host', '没有用户名也要认');
+  assert.strictEqual(webBase('https://cn4soc.rtkbf.com/'), 'https://cn4soc.rtkbf.com', '去掉尾斜杠');
+  assert.strictEqual(webBase(''), '', '空串还是空串');
+  assert.strictEqual(webBase('http://10.0.0.5:8080'), 'http://10.0.0.5:8080', 'http 原样保留');
+
+  const cell = toCell(
+    { _number: 263241, project: 'HoneyRepo/lvgl', status: 'NEW', labels: {} },
+    { server: 'ssh://roy_xie@cn4soc.rtkbf.com:29418' }
+  );
+  assert.strictEqual(cell.url, 'https://cn4soc.rtkbf.com/c/HoneyRepo/lvgl/+/263241');
+
+  // 网页入口在子路径下（这台 Gerrit 是 https://host/gerrit/）时，前缀要跟着走
+  const prefixed = toCell(
+    { _number: 263241, project: 'HoneyRepo/lvgl', status: 'NEW', labels: {} },
+    { server: 'https://host/gerrit' }
+  );
+  assert.strictEqual(prefixed.url, 'https://host/gerrit/c/HoneyRepo/lvgl/+/263241');
 });
 
 test('normalize 收敛非法配置', () => {

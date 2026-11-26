@@ -30,5 +30,7 @@ contextBridge.exposeInMainWorld('gerritDock', {
   onAppearance: (callback) => subscribe('dock:appearance', callback),
   onCard: (callback) => subscribe('card:cell', callback),
   // 日志下载的结果（进度谈不上，只有开始/成功/失败三态）
-  onLogState: (callback) => subscribe('dock:logState', callback)
+  onLogState: (callback) => subscribe('dock:logState', callback),
+  // 手动刷新的进度：running → done
+  onRefreshState: (callback) => subscribe('dock:refreshState', callback)
 });

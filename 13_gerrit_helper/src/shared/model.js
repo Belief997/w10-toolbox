@@ -17,6 +17,24 @@ function shortProject(project) {
   return parts[parts.length - 1] || project || '?';
 }
 
+// 项目路径：`HoneyRepo/lvgl` 保持斜杠，只编码每一段（空格、中文这些）
+function projectPath(project) {
+  return String(project || '').split('/').map(encodeURIComponent).join('/');
+}
+
+// 卡片的链接必须是**浏览器打得开**的地址。走 SSH 通道时 base 是
+// `ssh://user@host:29418`，直接拼出来是 ssh:// 链接 —— 点"在 Gerrit 打开"会
+// 被 https 白名单挡掉（就是"点了没反应"）。转成 https://host：
+// Gerrit 的网页入口和 SSH 是同一台机器，只是端口不同（29418 vs 443）。
+function webBase(server) {
+  const text = String(server || '').trim();
+  if (!text) return '';
+  if (/^https?:\/\//i.test(text)) return text.replace(/\/+$/, '');
+  const ssh = /^ssh:\/\/(?:[^@/]+@)?([^:/]+)(?::\d+)?\/?$/i.exec(text);
+  if (ssh) return `https://${ssh[1]}`;
+  return text.replace(/\/+$/, '');
+}
+
 // 某个 label 的分数汇总：最高分、最低分、以及"我自己"给的分
 function labelScore(change, name, selfId) {
   const all = change?.labels?.[name]?.all || [];
@@ -120,7 +138,7 @@ function toCell(change, context = {}) {
   const revision = change.revisions?.[change.current_revision];
   const tone = toneFor(change, cr, verified, needsReview);
   const number = change._number;
-  const base = context.server || '';
+  const base = webBase(context.server);
   return {
     id: `${base}|${number}`,
     number,
@@ -147,7 +165,9 @@ function toCell(change, context = {}) {
     color: TONE[tone],
     mark: markFor(change, cr, verified),
     label: `#${number}`,
-    url: base ? `${base}/c/${encodeURIComponent(change.project || '')}/+/${number}` : '',
+    // 项目名里的 `/` 是路径分隔符，**不能**整体 encodeURIComponent（`%2F` 拼出来
+    // 那一条在 Gerrit 上会 404 或者落到项目不存在），按段编码
+    url: base ? `${base}/c/${projectPath(change.project)}/+/${number}` : '',
     events: []
   };
 }
@@ -168,4 +188,4 @@ function toEvents(change, limit = 6) {
   return events.sort((a, b) => b.ts - a.ts).slice(0, limit);
 }
 
-module.exports = { MIN_ARC, TONE, labelScore, labelVoters, latestComment, markFor, parseGerritTime, reviewProgress, shortProject, toCell, toEvents };
+module.exports = { MIN_ARC, TONE, labelScore, labelVoters, latestComment, markFor, parseGerritTime, reviewProgress, shortProject, toCell, toEvents, webBase };

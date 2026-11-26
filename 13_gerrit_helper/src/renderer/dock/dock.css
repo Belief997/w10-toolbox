@@ -174,20 +174,23 @@ html, body {
   background: linear-gradient(to top, var(--glass) 0%, color-mix(in srgb, var(--glass) 40%, transparent) 70%, transparent 100%);
   border-radius: 0 0 12px 12px;
 }
-/* 顶部吸附（横排）：箭头挪到左右两端，渐变跟着转 90° */
-body[data-edge="top"] .rail-more {
+/* 横排（顶部或底部吸附）：箭头挪到左右两端，渐变跟着转 90° */
+body[data-edge="top"] .rail-more,
+body[data-edge="bottom"] .rail-more {
   top: 4px;
   bottom: 4px;
   width: 22px;
   height: auto;
 }
-body[data-edge="top"] .rail-more[data-dir="up"] {
+body[data-edge="top"] .rail-more[data-dir="up"],
+body[data-edge="bottom"] .rail-more[data-dir="up"] {
   left: 28px;
   right: auto;
   background: linear-gradient(to right, var(--glass) 0%, color-mix(in srgb, var(--glass) 40%, transparent) 70%, transparent 100%);
   border-radius: 12px 0 0 12px;
 }
-body[data-edge="top"] .rail-more[data-dir="down"] {
+body[data-edge="top"] .rail-more[data-dir="down"],
+body[data-edge="bottom"] .rail-more[data-dir="down"] {
   right: 28px;
   left: auto;
   background: linear-gradient(to left, var(--glass) 0%, color-mix(in srgb, var(--glass) 40%, transparent) 70%, transparent 100%);
@@ -198,8 +201,11 @@ body[data-edge="top"] .rail-more[data-dir="down"] {
 /* ---- 卡片 ---------------------------------------------------------------- */
 
 body[data-side="left"] .card { left: 12px; right: 0; }
-/* 顶部吸附：卡片在竖条下方，尾巴在上边 —— 内容整体下移一截，宽度占满 */
+/* 横排：卡片宽度占满窗口。
+   顶部吸附时卡片在竖条下方、尾巴在上边，内容整体下移一截；
+   底部吸附时卡片在竖条上方、尾巴在下边，内容从上边开始铺。 */
 body[data-edge="top"] .card { left: 0; right: 0; top: 12px; }
+body[data-edge="bottom"] .card { left: 0; right: 0; top: 0; }
 
 .card {
   /* 高度由内容决定：卡片窗口要靠渲染层量出来的高度再 setBounds，
@@ -320,6 +326,29 @@ body[data-edge="top"] .card { left: 0; right: 0; top: 12px; }
 }
 .card-foot button:hover { background: rgba(var(--overlay-rgb), 0.13); }
 .card-foot button:active { transform: scale(0.98); }
+
+/* 刷新按钮的三态：转动的小圈（进行中）→ 结果色（已更新 / 失败）→ 回到"刷新"。
+   状态由主进程推过来，渲染层只负责画。 */
+.card-foot button[data-state="busy"] {
+  color: var(--muted);
+  cursor: progress;
+}
+.card-foot button[data-state="busy"]::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: foot-spin 620ms linear infinite;
+}
+.card-foot button[data-state="done"] { color: var(--success); }
+.card-foot button[data-state="failed"] { color: var(--red); }
+
+@keyframes foot-spin { to { transform: rotate(360deg); } }
 
 /* 状态变化后主动弹出时，卡片顶部的高亮条 */
 .card-flash {

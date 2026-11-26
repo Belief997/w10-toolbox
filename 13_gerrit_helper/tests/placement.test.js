@@ -28,12 +28,59 @@ test('顶边也能吸，吸上之后横排', () => {
     { x: 500, y: 60, edge: null }, '差 60 → 保持');
 });
 
+test('底边也能吸，吸上之后横排贴在屏幕底部', () => {
+  // 工作区高 720、面板高 300：y=412 时离底边 8px
+  assert.deepStrictEqual(snapOnRelease({ ...SIZE, x: 500, y: 412 }),
+    { x: 500, y: 420, edge: 'bottom' }, '差 8 → 吸住底边');
+  assert.deepStrictEqual(snapOnRelease({ ...SIZE, x: 500, y: 360 }),
+    { x: 500, y: 360, edge: null }, '差 60 → 保持');
+});
+
+test('竖条拖到底边：吸附后按"横过来之后的厚度"落位，不是按竖着时的高度', () => {
+  // 工作区 1280×720，竖条 64×300 被夹在 y=420（正好贴着底边）
+  const snapped = snapOnRelease({ ...SIZE, x: 500, y: 420, thickness: 64 });
+  assert.strictEqual(snapped.edge, 'bottom');
+  assert.strictEqual(snapped.y, 720 - 64, '横过来之后高度是 64，底边应该落在 656');
+  // 不传厚度（老调用）时按传进来的 height 算，行为不变
+  assert.strictEqual(snapOnRelease({ ...SIZE, x: 500, y: 420 }).y, 420);
+});
+
+test('底边两个吸附位：压进任务栏贴屏幕底，停在上沿附近贴任务栏上沿', () => {
+  // 1280×720 的屏幕，底部 48px 是任务栏 → 工作区只有 672 高
+  const workArea = { x: 0, y: 0, width: 1280, height: 672 };
+  const bounds = { x: 0, y: 0, width: 1280, height: 720 };
+  // 竖条 64×300，drop 是松手时面板的下沿
+  const at = (drop) => snapOnRelease({
+    x: 500, y: drop - 300, width: 64, height: 300, workArea, bounds, thickness: 64
+  });
+
+  const onScreen = at(720);
+  assert.strictEqual(onScreen.edge, 'bottom');
+  assert.strictEqual(onScreen.y, 720 - 64, '下沿到屏幕底 → 贴屏幕底');
+
+  const insideTaskbar = at(690);
+  assert.strictEqual(insideTaskbar.edge, 'bottom');
+  assert.strictEqual(insideTaskbar.y, 720 - 64, '在任务栏之间 → 贴屏幕底');
+
+  const nearTaskbar = at(660);
+  assert.strictEqual(nearTaskbar.edge, 'bottom');
+  assert.strictEqual(nearTaskbar.y, 672 - 64, '停在上沿磁吸范围 → 压在上沿之上');
+
+  const tooHigh = at(620);
+  assert.strictEqual(tooHigh.edge, null, '离两条边都超过 28 → 不吸');
+});
+
 test('角上不抢：两条边一样近时按侧边处理', () => {
   // 右上角两条边都是 0 距离：保持竖排，否则竖条会莫名横过来
   assert.strictEqual(snapOnRelease({ ...SIZE, x: 1216, y: 0 }).edge, 'right');
   assert.strictEqual(snapOnRelease({ ...SIZE, x: 0, y: 0 }).edge, 'left');
+  // 右下角同理：底边不抢
+  assert.strictEqual(snapOnRelease({ ...SIZE, x: 1216, y: 420 }).edge, 'right');
+  assert.strictEqual(snapOnRelease({ ...SIZE, x: 0, y: 420 }).edge, 'left');
   // 顶边更近时才选顶边
   assert.strictEqual(snapOnRelease({ ...SIZE, x: 1200, y: 0 }).edge, 'top');
+  // 底边更近时才选底边
+  assert.strictEqual(snapOnRelease({ ...SIZE, x: 1200, y: 420 }).edge, 'bottom');
 });
 
 test('磁吸阈值可以调', () => {
@@ -42,8 +89,9 @@ test('磁吸阈值可以调', () => {
 });
 
 test('吸附时也会把坐标夹回工作区', () => {
+  // 已经掉到底边外面：按"贴着底边"算（比右边那 16px 更近），x/y 都夹回来
   assert.deepStrictEqual(snapOnRelease({ ...SIZE, x: 1200, y: 9999 }),
-    { x: 1216, y: 420, edge: 'right' }, '底边外 → 夹回来');
+    { x: 1200, y: 420, edge: 'bottom' }, '底边外 → 夹回来');
   assert.deepStrictEqual(snapOnRelease({ ...SIZE, x: 500, y: -50 }),
     { x: 500, y: 0, edge: 'top' }, '顶边外 → 夹回来，同时吸到顶边');
 });

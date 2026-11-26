@@ -4,9 +4,10 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
+const { execFile } = require('node:child_process');
 const {
   app, BrowserWindow, Menu, Notification, Tray, desktopCapturer, dialog, globalShortcut,
-  ipcMain, nativeImage, screen, session, shell
+  ipcMain, nativeImage, powerMonitor, powerSaveBlocker, screen, session, shell
 } = require('electron');
 
 const { createLogger } = require('./log');
@@ -21,6 +22,8 @@ const { createDock } = require('./dock');
 const { createPoller } = require('./poller');
 const { createNotifier } = require('./notify');
 const { diffCells } = require('../shared/diff');
+const { buildMessageText, shouldSendWeChat } = require('../shared/build-message');
+const { send: sendWeChat } = require('../wechat');
 const { sanitizeImport, summarize, toExportable } = require('../shared/config-io');
 const demo = require('./demo');
 
@@ -105,8 +108,65 @@ function bootstrapFromMachine() {
   openSettings();
 }
 
+// 打开请求的计数，自检用（--open-smoke 靠它判断"按钮有没有真发出来"）
+let openedCount = 0;
+
 function openUrl(url) {
-  if (/^https?:\/\//i.test(String(url || ''))) shell.openExternal(url);
+  if (!/^https?:\/\//i.test(String(url || ''))) return;
+  openedCount += 1;
+  // openExternal 返回 Promise：系统没有默认浏览器 / 协议被占用时会 reject，
+  // 不接住的话就是"点了没反应"，连日志都没有
+  shell.openExternal(url).catch((error) => logger.warn(`[open] 打开失败 ${url}：${error.message}`));
+}
+
+// 自检用：把光标挪到某个**物理**像素点（不点），测完再挪回去。
+// 坐标是物理像素：多显示器 + 缩放时 DIP 和物理像素不是一回事，用 screen.dipToScreenPoint 换。
+function moveCursor(x, y) {
+  return new Promise((resolve) => {
+    const script = 'Add-Type -AssemblyName System.Windows.Forms;'
+      + 'Add-Type -AssemblyName System.Drawing;'
+      + `[System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new(${Math.round(x)},${Math.round(y)})`;
+    execFile('powershell.exe', ['-NoProfile', '-Command', script], { windowsHide: true },
+      (error) => resolve(error ? error.message : ''));
+  });
+}
+
+// 自检用：在**当前光标位置**真点一下（左键按下+抬起）。这是操作系统级点击，
+// 会走和用户手点完全一样的那条路（窗口穿透、命中测试全算上）。
+function clickHere() {
+  return new Promise((resolve) => {
+    const script = 'Add-Type -MemberDefinition '
+      + '\'[DllImport("user32.dll")] public static extern void mouse_event(uint f, int x, int y, uint d, int e);\' '
+      + '-Name Click -Namespace Probe;'
+      + '[Probe.Click]::mouse_event(0x0002,0,0,0,0);'
+      + 'Start-Sleep -Milliseconds 40;'
+      + '[Probe.Click]::mouse_event(0x0004,0,0,0,0)';
+    execFile('powershell.exe', ['-NoProfile', '-Command', script], { windowsHide: true },
+      (error) => resolve(error ? error.message : ''));
+  });
+}
+
+// 自检用：真拖一次（按下 → 分几步挪 → 松开），全程用操作系统级鼠标事件。
+// 主进程拖拽读的是**真实光标位置**，所以合成 DOM 事件测不出来，只能真动鼠标。
+function dragBy(dx, dy, steps = 6) {
+  return new Promise((resolve) => {
+    const script = 'Add-Type -AssemblyName System.Windows.Forms;'
+      + 'Add-Type -AssemblyName System.Drawing;'
+      + 'Add-Type -MemberDefinition \'[DllImport("user32.dll")] public static extern void mouse_event(uint f, int x, int y, uint d, int e);\' -Name Click -Namespace Probe;'
+      + '$p = [System.Windows.Forms.Cursor]::Position;'
+      + '[Probe.Click]::mouse_event(0x0002,0,0,0,0);'
+      + 'Start-Sleep -Milliseconds 120;'
+      + `for ($i = 1; $i -le ${steps}; $i++) {`
+      + `  $nx = $p.X + [int](${dx} * $i / ${steps});`
+      + `  $ny = $p.Y + [int](${dy} * $i / ${steps});`
+      + '  [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($nx, $ny);'
+      + '  Start-Sleep -Milliseconds 90;'
+      + '}'
+      + 'Start-Sleep -Milliseconds 150;'
+      + '[Probe.Click]::mouse_event(0x0004,0,0,0,0);';
+    execFile('powershell.exe', ['-NoProfile', '-Command', script], { windowsHide: true },
+      (error) => resolve(error ? error.message : ''));
+  });
 }
 
 // ---- 控制台日志下载 ------------------------------------------------------
@@ -183,6 +243,293 @@ async function runConsoleDownload(job, number) {
   return { ok: true, ...result };
 }
 
+// ---- 手动刷新 ------------------------------------------------------------
+// 卡片上的「刷新」按钮：拉一轮，并把"刷到哪一步"推回卡片做动画。
+// 完成信号来自 handleCells（不管成功还是失败都会调），另有 15s 兜底，
+// 免得某次拉取卡住时按钮一直转。
+let manualRefresh = null;
+
+function startManualRefresh() {
+  if (manualRefresh) return;
+  if (!poller) {
+    // demo / 没配服务器：没有可刷的东西，立刻收掉动画
+    dock?.pushRefreshState({ state: 'done', ok: false, ms: 0, reason: '没有可刷新的数据源' });
+    return;
+  }
+  manualRefresh = {
+    startedAt: Date.now(),
+    timer: setTimeout(() => finishManualRefresh({ ok: false, timeout: true }), 15000)
+  };
+  dock?.pushRefreshState({ state: 'running' });
+  poller.pollNow();
+}
+
+function finishManualRefresh(result) {
+  if (!manualRefresh) return;
+  clearTimeout(manualRefresh.timer);
+  const ms = Date.now() - manualRefresh.startedAt;
+  manualRefresh = null;
+  dock?.pushRefreshState({ state: 'done', ok: result?.ok !== false, ms, timeout: result?.timeout === true });
+}
+
+// ---- 构建失败自动下日志 --------------------------------------------------
+// 失败的那一轮往往要立刻看控制台，等你去点卡片就晚了，所以默认开着。
+// 复用卡片按钮那条路：同一构建在下载中不会重复下，下完一样弹"已保存"通知。
+function watchBuildForAutoLog(cells, events) {
+  const config = store.get();
+  if (DEMO || config.demo) return;
+  if (config.jenkins?.autoDownloadLog === false) return;
+  for (const event of events) {
+    if (event.type !== 'status' || !String(event.cellId).startsWith('build|')) continue;
+    if (event.to !== 'FAILURE') continue;
+    const cell = cells.find((item) => item.id === event.cellId);
+    if (!cell) continue;
+    logger.info(`[console] ${cell.job}#${cell.number} 构建失败，自动下载日志`);
+    downloadBuildLog(cell);
+  }
+}
+
+// ---- 构建结束发微信 ------------------------------------------------------
+// 回放 14_wechat 的流程，把一段文案发到微信。三条约束：
+//   1. **一次只发一条** —— 回放会把微信拽到前台再模拟点击，两条并行会互相点飞
+//   2. 同一个 (job, 构建号, 状态) 只发一次 —— 一分钟一轮轮询，同一次迁移会被反复命中
+//   3. 只发"跑完了/卡住了"的状态，IN_PROGRESS 不发
+// 代价：发送期间微信会抢焦点 1~2 秒（14 的 play() 第一步就是 ps.focus()）。
+
+const WECHAT_QUEUE_LIMIT = 3;
+// 发送失败（多数是抢不到前台）时重试：3 次、间隔 8s / 16s。
+// 实测自动触发比手点更容易失败 —— Windows 的前台锁只允许"用户正在操作的进程"抢焦点，
+// 定时器触发时我们不是那个进程，只能等用户切回微信的那一下。
+const WECHAT_ATTEMPTS = 3;
+const WECHAT_RETRY_MS = 8000;
+// 锁屏中：进程照常跑（轮询、下日志都不断），微信那套直接丢
+let sessionLocked = false;
+// 每次锁屏 +1：锁屏前挂着的重试链一律作废，免得解锁后补发
+let wechatEpoch = 0;
+
+// ---- 阻止休眠 / 息屏 / 自动锁屏 -------------------------------------------
+// 两件事分开做，因为 Windows 的两个机制不是一回事：
+//   1. 电源请求 prevent-display-sleep（= Win32 的 SetThreadExecutionState + ES_DISPLAY_REQUIRED，
+//      视频播放器和浏览器用的**就是这一个**）→ 屏幕不自动关、系统不自动睡、屏保不启动。
+//      所谓"放视频不会锁屏"就是这么来的。
+//   2. 闲置锁屏（安全策略的 Interactive logon: Machine inactivity limit，也就是注册表里的
+//      InactivityTimeoutSecs）—— 电源请求对它无效，它只认"有没有用户输入"。
+//      这种才需要人不在的时候每 20 秒动一下鼠标（1px，立刻移回来）。
+// 挡不住的仍然有：Win+L 手动锁屏。
+const KEEPALIVE_IDLE_SEC = 40;     // 人不在超过这么久才动鼠标
+const KEEPALIVE_TICK_MS = 20000;
+
+let keepAwakeId = null;
+let keepAliveTimer = null;
+let nudging = false;
+// 有没有"闲置 N 秒就锁屏"这条安全策略。null = 还没查。
+// 没有这条策略时**不动用户的鼠标** —— 光靠电源请求就够了。
+let inactivityLockSec = null;
+
+function readInactivityLock() {
+  return new Promise((resolve) => {
+    execFile('reg.exe', [
+      'query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System',
+      '/v', 'InactivityTimeoutSecs'
+    ], { windowsHide: true }, (error, stdout) => {
+      if (error) { resolve(0); return; }
+      const match = /InactivityTimeoutSecs\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(String(stdout || ''));
+      resolve(match ? parseInt(match[1], 16) : 0);
+    });
+  });
+}
+
+async function inactivityPolicy() {
+  if (inactivityLockSec === null) {
+    inactivityLockSec = await readInactivityLock();
+    logger.info(inactivityLockSec > 0
+      ? `[power] 检测到闲置锁屏策略：${inactivityLockSec}s 无输入就锁屏（需要动鼠标）`
+      : '[power] 没有闲置锁屏策略：只靠电源请求，不动鼠标');
+  }
+  return inactivityLockSec;
+}
+
+// 动 1px 再移回来：任何输入都会重置 Windows 的闲置计时
+function nudgeMouse() {
+  if (nudging) return;
+  nudging = true;
+  const script = 'Add-Type -MemberDefinition '
+    + '\'[DllImport("user32.dll")] public static extern void mouse_event(uint f, int x, int y, uint d, int e);\' '
+    + '-Name M -Namespace N;'
+    + '[N.M]::mouse_event(0x0001,1,0,0,0);'
+    + 'Start-Sleep -Milliseconds 40;'
+    + '[N.M]::mouse_event(0x0001,-1,0,0,0)';
+  execFile('powershell.exe', ['-NoProfile', '-Command', script], { windowsHide: true }, (error) => {
+    nudging = false;
+    if (error) logger.warn(`[power] 防锁屏动鼠标失败：${error.message}`);
+  });
+}
+
+function startKeepAlive() {
+  if (keepAliveTimer) return;
+  const threshold = Number(process.env.KEEPALIVE_TEST) || KEEPALIVE_IDLE_SEC;
+  keepAliveTimer = setInterval(() => {
+    const idle = powerMonitor.getSystemIdleTime();
+    if (idle < threshold) return;   // 人在用，别去碰鼠标
+    logger.info(`[power] 闲置 ${idle}s，动一下鼠标防止锁屏`);
+    nudgeMouse();
+  }, Number(process.env.KEEPALIVE_TEST) ? 2000 : KEEPALIVE_TICK_MS);
+  logger.info(`[power] 防锁屏保活已启动（闲置 ≥ ${threshold}s 才动鼠标）`);
+}
+
+function stopKeepAlive() {
+  if (!keepAliveTimer) return;
+  clearInterval(keepAliveTimer);
+  keepAliveTimer = null;
+  logger.info('[power] 防锁屏保活已停止');
+}
+
+function applyKeepAwake(reason = '') {
+  const want = store.get().keepAwake !== false;
+  const started = keepAwakeId !== null && powerSaveBlocker.isStarted(keepAwakeId);
+  if (want) {
+    if (!started) {
+      try {
+        keepAwakeId = powerSaveBlocker.start('prevent-display-sleep');
+        logger.info(`[power] 已阻止显示器休眠${reason ? `（${reason}）` : ''} id=${keepAwakeId}`);
+      } catch (error) {
+        keepAwakeId = null;
+        logger.warn(`[power] 阻止显示器休眠失败：${error.message}`);
+      }
+    }
+    // 只有在真有"闲置锁屏"策略时才去动鼠标；KEEPALIVE_TEST 是自检用的强制开关
+    inactivityPolicy().then((sec) => {
+      if (store.get().keepAwake === false) return;
+      if (sec > 0 || process.env.KEEPALIVE_TEST) startKeepAlive();
+      else stopKeepAlive();
+    });
+    return;
+  }
+  if (started) {
+    try { powerSaveBlocker.stop(keepAwakeId); } catch (_) { /* 已经停了 */ }
+    logger.info('[power] 已恢复系统默认的熄屏/睡眠策略');
+  }
+  keepAwakeId = null;
+  stopKeepAlive();
+}
+
+function watchPowerEvents() {
+  try {
+    powerMonitor.on('lock-screen', () => {
+      sessionLocked = true;
+      // **不补发**：锁屏时微信那条链根本发不出去，攒着也没意义 —— 解锁后补发一条
+      // 半小时前的"构建失败"只会让人误解成刚失败。锁屏即丢，日志里留个记号。
+      wechatEpoch += 1;
+      const dropped = wechatQueue.length;
+      wechatQueue.length = 0;
+      logger.info(`[power] 已锁屏：继续轮询和下载日志，微信消息不补发${dropped ? `（丢掉 ${dropped} 条待发）` : ''}`);
+    });
+    powerMonitor.on('unlock-screen', () => {
+      sessionLocked = false;
+      logger.info('[power] 已解锁');
+    });
+    // 休眠不是锁屏：定时器会一起停。醒来后所有 setTimeout 集中触发，
+    // 那一次 poll 会把睡眠期间的变化一次性报出来 —— 这是对的，不用特殊处理
+    powerMonitor.on('suspend', () => logger.info('[power] 系统休眠'));
+    powerMonitor.on('resume', () => logger.info('[power] 系统唤醒'));
+  } catch (error) {
+    logger.warn(`[power] 订阅电源事件失败：${error.message}`);
+  }
+}
+const wechatQueue = [];
+const wechatSent = new Set();
+let wechatBusy = false;
+
+// 流程文件：设置里填了就用它（相对路径按程序目录解析），
+// 留空就找同级目录的 14_wechat —— 开发时的布局
+// 传 override 时用传进来的值（设置页"发一条测试消息"用的是表单里还没保存的那份）
+function resolveWechatFlow(override) {
+  const programDir = path.dirname(store.dataDir());
+  const configured = String(override ?? store.get().wechat?.flow ?? '').trim();
+  if (configured) return path.resolve(programDir, configured);
+  return path.join(programDir, '..', '14_wechat', 'build', 'recorded.json');
+}
+
+function watchBuildForWeChat(cells, events) {
+  const config = store.get();
+  if (DEMO || config.demo || config.wechat?.enabled !== true) return;
+  for (const event of events) {
+    if (event.type !== 'status' || !String(event.cellId).startsWith('build|')) continue;
+    if (!shouldSendWeChat(event.to)) continue;
+    const cell = cells.find((item) => item.id === event.cellId);
+    if (!cell) continue;
+    const key = `${cell.id}#${cell.number}#${event.to}`;
+    if (wechatSent.has(key)) continue;
+    wechatSent.add(key);
+    if (wechatQueue.length >= WECHAT_QUEUE_LIMIT) {
+      logger.warn(`[wechat] 队列满了，丢掉 ${key}`);
+      continue;
+    }
+    wechatQueue.push({ cell, state: event.to });
+  }
+  pumpWeChat();
+}
+
+async function pumpWeChat() {
+  if (wechatBusy || !wechatQueue.length) return;
+  // 锁屏是另一个桌面：窗口抢不到前台、模拟点击也落空，这时候发只是白费三次重试。
+  // 直接丢掉（锁屏那一刻已经清过队列，这里兜住"锁屏期间又有新事件进来"的情况）。
+  if (sessionLocked) {
+    const dropped = wechatQueue.length;
+    wechatQueue.length = 0;
+    logger.info(`[wechat] 锁屏中，丢掉 ${dropped} 条（不补发）`);
+    return;
+  }
+  wechatBusy = true;
+  const job = wechatQueue.shift();
+  const { cell, state } = job;
+  const key = `${cell.id}#${cell.number}#${state}`;
+  const attempt = (job.attempt || 0) + 1;
+  try {
+    const flow = resolveWechatFlow();
+    logger.info(`[wechat] 发送 ${key}（第 ${attempt}/${WECHAT_ATTEMPTS} 次）flow=${flow}`);
+    await sendWeChat(buildMessageText(cell, state), {
+      flow,
+      log: (message) => logger.info(`[wechat] ${message}`),
+      logger
+    });
+    logger.info(`[wechat] 已发送 ${key}`);
+  } catch (error) {
+    // 失败大多是"微信不在前台"（Windows 的前台锁让后台进程抢不到焦点）或者
+    // 坐标上盖着别的窗口。等一会儿再试 —— 用户这时候往往正好切回微信。
+    logger.warn(`[wechat] 第 ${attempt} 次发送失败 ${key}：${error.message}`);
+    if (attempt < WECHAT_ATTEMPTS) {
+      const delay = attempt * WECHAT_RETRY_MS;
+      const epoch = wechatEpoch;
+      logger.info(`[wechat] ${Math.round(delay / 1000)}s 后重试`);
+      setTimeout(() => {
+        // 中间锁过屏：这条重试链作废，不补发
+        if (epoch !== wechatEpoch) {
+          logger.info(`[wechat] 期间锁过屏，放弃重试 ${key}`);
+          return;
+        }
+        if (wechatQueue.length >= WECHAT_QUEUE_LIMIT) {
+          logger.warn(`[wechat] 队列满了，放弃重试 ${key}`);
+          notifyWeChatFailed(`${key}：${error.message}`);
+          return;
+        }
+        wechatQueue.push({ cell, state, attempt });
+        pumpWeChat();
+      }, delay);
+      return;
+    }
+    notifyWeChatFailed(error.message);
+  } finally {
+    wechatBusy = false;
+    setImmediate(() => { pumpWeChat(); });
+  }
+}
+
+function notifyWeChatFailed(reason) {
+  if (!Notification.isSupported()) return;
+  new Notification({ title: '微信没发出去', body: reason }).show();
+}
+
 function handleCells(cells, result = {}) {
   const events = diffCells(lastCells, cells);
   lastCells = cells;
@@ -204,6 +551,13 @@ function handleCells(cells, result = {}) {
   // 竖条一屏只放得下十来条，总数在托盘提示里给全
   tray?.setToolTip(`Gerrit Helper · ${cells.length} 条在途${result?.transport === 'ssh' ? '（SSH）' : ''}`);
   if (events.length) notifier?.notify(events);
+  // Jenkins 那边"跑完了 / 卡住了"→ 发微信（和桌面通知各走各的开关）
+  if (events.length && result.ok !== false) {
+    watchBuildForWeChat(cells, events);
+    watchBuildForAutoLog(cells, events);
+  }
+  // 手动刷新那一次的轮询回来了：把按钮上的转圈收掉
+  if (result?.stale !== true) finishManualRefresh({ ok: result?.ok !== false });
   if (result?.errors?.length) console.warn('[gerrit]', result.errors.join(' | '));
 }
 
@@ -254,7 +608,7 @@ function buildDock(previewPatch = null) {
     preloadPath: DOCK_PRELOAD,
     getConfig: store.get,
     onOpenUrl: openUrl,
-    onManualRefresh: () => poller?.pollNow(),
+    onManualRefresh: () => startManualRefresh(),
     onOpenSettings: openSettings,
     // 卡片上的「下载日志」：下完把结果推回卡片（按钮要从"下载中"变回可点）
     onDownloadLog: async (cellId) => {
@@ -341,6 +695,7 @@ function registerSettingsIpc() {
       configPath: store.configPath(),
       // 设置页拿它当"留空时日志会存到哪"的提示
       logDir: resolveLogDir(),
+      wechatFlow: resolveWechatFlow(),
       hasPassword: Boolean(password),
       hasJenkinsToken: Boolean(jenkinsToken),
       demo: DEMO,
@@ -429,6 +784,39 @@ function registerSettingsIpc() {
       title: '选择日志下载目录',
       defaultPath: resolveLogDir(),
       properties: ['openDirectory', 'createDirectory']
+    });
+    if (result.canceled || !result.filePaths?.length) return { ok: false, canceled: true };
+    return { ok: true, path: result.filePaths[0] };
+  });
+
+  // 「发一条测试消息」：立刻回放一次，用当前表单里的流程路径（不用先保存）。
+  // 这是**真的发**——会抢焦点 1~2 秒，消息进「文件传输助手」。
+  ipcMain.handle('settings:testWechat', async (event, patch) => {
+    if (wechatBusy) return { ok: false, error: '正在发送上一条，等它跑完' };
+    const merged = mergeSettings(patch);
+    const flow = resolveWechatFlow(merged.wechat?.flow || '');
+    // 有真实的构建格子就发它，没有就发一条测试文案
+    const cell = lastCells.find((item) => item.kind === 'build')
+      || { job: '测试~GerritHelper', number: 0, url: '' };
+    const text = buildMessageText(cell, 'SUCCESS');
+    try {
+      await sendWeChat(text, { flow, log: (message) => logger.info(`[wechat] ${message}`), logger });
+      logger.info(`[wechat] 测试消息已发送 flow=${flow}`);
+      return { ok: true, flow, text };
+    } catch (error) {
+      logger.warn(`[wechat] 测试消息失败：${error.message}`);
+      return { ok: false, flow, text, error: error.message };
+    }
+  });
+
+  // 「选择…」微信流程文件：只认 JSON
+  ipcMain.handle('settings:pickFlow', async () => {
+    const owner = settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : undefined;
+    const result = await dialog.showOpenDialog(owner, {
+      title: '选择微信流程文件',
+      defaultPath: resolveWechatFlow(),
+      properties: ['openFile'],
+      filters: [{ name: '流程 JSON', extensions: ['json'] }]
     });
     if (result.canceled || !result.filePaths?.length) return { ok: false, canceled: true };
     return { ok: true, path: result.filePaths[0] };
@@ -570,6 +958,7 @@ function applySavedConfig(before, config) {
   } else if (before.glassAlpha !== config.glassAlpha) {
     dock?.refreshAppearance?.();
   }
+  applyKeepAwake('设置变更');
   restartPipeline();
 }
 
@@ -659,6 +1048,8 @@ if (LOCKED && !app.requestSingleInstanceLock()) {
     buildDock();
     restartPipeline();
     buildTray();
+    watchPowerEvents();
+    applyKeepAwake('启动');
     globalShortcut.register('Control+Alt+D', () => diagnose());
 
     // 自检用：--log-smoke 把 build 那张卡片摆出来，真点「下载日志」，
@@ -667,7 +1058,7 @@ if (LOCKED && !app.requestSingleInstanceLock()) {
     if (process.argv.includes('--log-smoke')) {
       setTimeout(async () => {
         try {
-          if (!lastCells.some((cell) => cell.kind === 'build')) {
+          if (!(lastCells || []).some((cell) => cell.kind === 'build')) {
             logger.warn('[log-smoke] 没有 build 格子（没配 Jenkins，或者第一轮还没拉到）');
             app.exit(1);
             return;
@@ -693,6 +1084,170 @@ if (LOCKED && !app.requestSingleInstanceLock()) {
           app.exit(1);
         }
       }, 8000);
+    }
+
+    // 自检用：--wechat-smoke 往队列里塞一条假消息，看发送/重试那套跑得对不对。
+    // 把 flow 指到一个不存在的文件就能在不碰微信的情况下跑完整条失败路径。
+    if (process.argv.includes('--wechat-smoke')) {
+      setTimeout(() => {
+        logger.info(`[wechat] 自检：flow=${resolveWechatFlow()}`);
+        wechatQueue.push({
+          cell: { id: 'build|Smoke~Job', job: 'Smoke~Job', number: 0, stages: [] },
+          state: 'FAILURE'
+        });
+        pumpWeChat();
+      }, 5000);
+      setTimeout(() => app.exit(0), 40000);
+    }
+
+    // 自检用：--drag-smoke=real|card 用真实鼠标把面板往下拖 120px，看它跟不跟手。
+    // real 从竖条上拖，card 从卡片正文上拖（两条入口）。
+    const realDragArg = process.argv.find((arg) => arg.startsWith('--drag-smoke='));
+    if (realDragArg) {
+      setTimeout(async () => {
+        const before = screen.getCursorScreenPoint();
+        try {
+          const ring = dock.debugRailPoint?.(0);
+          if (ring) await moveCursor(...Object.values(screen.dipToScreenPoint(ring)));
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          if (realDragArg.endsWith('=card')) {
+            const card = dock.surfaceStates?.().find((item) => item.name === 'card')?.bounds;
+            if (!card) throw new Error('没有卡片窗口');
+            const spot = { x: card.x + Math.round(card.width / 2), y: card.y + 40 };
+            await moveCursor(...Object.values(screen.dipToScreenPoint(spot)));
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          }
+          const start = dock.surfaceStates?.().find((s) => s.name === 'rail')?.bounds;
+          // 从卡片上拖时面板已经贴着底边了，往下拖会被夹住 —— 往上拖
+          const error = await dragBy(0, realDragArg.endsWith('=card') ? -60 : 120);
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          const end = dock.surfaceStates?.().find((s) => s.name === 'rail')?.bounds;
+          logger.info(`[drag-smoke] 真实拖动=${error || '已发出'} 起点=${JSON.stringify(start)} 终点=${JSON.stringify(end)}`);
+        } catch (error) {
+          logger.warn(`[drag-smoke] 失败：${error.message}`);
+        } finally {
+          const physical = screen.dipToScreenPoint(before);
+          await moveCursor(physical.x, physical.y);
+          app.exit(0);
+        }
+      }, 8000);
+    }
+
+    // 自检用：--refresh-smoke 点卡片上的「刷新」，然后每 200ms 读一次按钮状态，
+    // 看这条链通不通：点击 → 主进程拉一轮 → 推 running/done → 按钮转圈再回弹。
+    if (process.argv.includes('--refresh-smoke')) {
+      setTimeout(async () => {
+        try {
+          dock.debugFocus?.(0);
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          const before = await dock.debugRefreshButton?.(true);
+          logger.info(`[refresh-smoke] 点击前 ${JSON.stringify(before)}`);
+          for (let i = 0; i < 40; i += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            const now = await dock.debugRefreshButton?.(false);
+            logger.info(`[refresh-smoke] +${(i + 1) * 200}ms ${JSON.stringify(now)}`);
+            if (i > 3 && now?.state === 'idle') break;
+          }
+        } catch (error) {
+          logger.warn(`[refresh-smoke] 失败：${error.message}`);
+        } finally {
+          app.exit(0);
+        }
+      }, 9000);
+    }
+
+    // 自检用：--open-smoke 走一遍用户真实路径：光标挪到圆环（出卡片）→ 挪到卡片
+    // 的「在 Gerrit 打开」→ 真点一下（操作系统级点击）。测完光标挪回原处。
+    // 会真的开一次浏览器（本来就是按钮的功能），所以别在忙的时候跑。
+    if (process.argv.includes('--open-smoke')) {
+      setTimeout(async () => {
+        const before = screen.getCursorScreenPoint();
+        const wasPhysical = screen.dipToScreenPoint(before);
+        try {
+          // 走用户那条路：先把光标放到圆环上（tick 会 focus → 出卡片），
+          // 再挪到卡片按钮上（tick 会判定 inCard → 窗口变可点）
+          const move = async (dip) => {
+            const physical = screen.dipToScreenPoint({ x: dip.x, y: dip.y });
+            return moveCursor(physical.x, physical.y);
+          };
+          const ring = dock.debugRailPoint?.(0);
+          if (ring) await move(ring);
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          const hover = dock.pointerState?.() || {};
+          const spot = await dock.debugCardPoint?.('Gerrit');
+          let moveError = '';
+          if (spot) moveError = await move(spot);
+          await new Promise((resolve) => setTimeout(resolve, 350));
+          const state = dock.pointerState?.() || {};
+          logger.info(`[open-smoke] 悬停圆环时=${JSON.stringify(hover)} 按钮 DIP=${JSON.stringify(spot)}`
+            + ` 光标=${JSON.stringify(screen.getCursorScreenPoint())} 移动=${moveError || '无'}`);
+          logger.info(`[open-smoke] 主进程视角：${JSON.stringify({
+            inCard: state.inCard, inCorridor: state.inCorridor, cardVisible: state.cardVisible
+          })}`);
+          // 真点（操作系统级鼠标事件），和用户手点同一条路
+          const clickError = await clickHere();
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+          logger.info(`[open-smoke] 真点击=${clickError || '已发出'}；收到打开请求 ${openedCount} 次`);
+        } catch (error) {
+          logger.warn(`[open-smoke] 失败：${error.message}`);
+        } finally {
+          await moveCursor(wasPhysical.x, wasPhysical.y);
+          app.exit(0);
+        }
+      }, 8000);
+    }
+
+    // 自检用：--dock-smoke=<top|bottom|left|right> 把面板摆到指定的边，
+    // 读回真实几何（窗口 bounds / side）和竖条 DOM，截一张图，然后退出。
+    // 四条边共用一套骨架，靠它一眼看出哪条边没接上。测完把位置改回原来的。
+    const smokeArg = process.argv.find((arg) => arg.startsWith('--dock-smoke='));
+    if (smokeArg) {
+      const edge = smokeArg.split('=')[1];
+      setTimeout(async () => {
+        const previous = store.get().position;
+        try {
+          const display = screen.getPrimaryDisplay();
+          const work = display.workArea;
+          // 底边贴的是屏幕底（面板压在任务栏上），顶边和左右贴工作区
+          const screenBottom = display.bounds.y + display.bounds.height;
+          const thickness = 64;
+          const horizontal = edge === 'top' || edge === 'bottom';
+          const position = {
+            x: horizontal ? work.x + 300
+              : (edge === 'left' ? work.x : work.x + work.width - thickness),
+            y: horizontal
+              ? (edge === 'top' ? work.y : screenBottom - thickness)
+              : work.y + 200,
+            edge
+          };
+          logger.info(`[dock-smoke] display=${JSON.stringify({ bounds: display.bounds, workArea: display.workArea })}`);
+          store.save({ position });
+          dock.refreshLayout();
+          // 等第一轮数据到（首轮要 4~8 秒），否则量到的是"读取中"那块小面板
+          for (let i = 0; i < 30 && !lastCells?.length; i += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          await new Promise((resolve) => setTimeout(resolve, 900));
+          // 顺手把卡片摆出来：横排的卡片挂在上/下方，尾巴朝向竖条，位置最容易错
+          await dock.debugCard(0);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          logger.info(`[dock-smoke] ${edge} surfaces=${JSON.stringify(dock.surfaceStates?.() || null)}`);
+          logger.info(`[dock-smoke] ${edge} rail=${JSON.stringify(await dock.debugRail())}`);
+          logger.info(`[dock-smoke] ${edge} card=${JSON.stringify(await dock.debugCard(0))}`);
+          // 拖离：贴着边开始，往上每步 10px —— y 应该跟着走，不许粘在边上
+          const away = await dock.debugDragAway?.({ dy: -10, steps: 6 });
+          logger.info(`[dock-smoke] ${edge} 拖离 ${JSON.stringify(away)}`);
+          // 拖离会退回原位，中间有一段 200ms 形变，等它跑完再截图
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          await diagnose();
+        } catch (error) {
+          logger.warn(`[dock-smoke] 失败：${error.message}`);
+        } finally {
+          // 位置是这个自检唯一改过的东西，测完放回去
+          if (previous) store.save({ position: previous });
+          app.exit(0);
+        }
+      }, 6000);
     }
 
     // 自检用：--preview-smoke 会在 8 秒后把不透明度预览到 5%，用来验证
@@ -723,10 +1278,10 @@ if (LOCKED && !app.requestSingleInstanceLock()) {
 
     if (process.argv.includes('--drag-smoke')) {
       setTimeout(async () => {
-        // 贴边 → 悬空 → 跨屏 → 顶边（横排）→ 回右侧
+        // 贴边 → 悬空 → 跨屏 → 顶边（横排）→ 底边（贴上沿）→ 底边（压任务栏）→ 回右侧
         for (const spot of [
           { x: 1190, y: 320 }, { x: 1032, y: 300 }, { x: 1600, y: 200 },
-          { x: 520, y: 6 }, { x: 1190, y: 320 }
+          { x: 520, y: 6 }, { x: 500, y: 446 }, { x: 500, y: 700 }, { x: 1190, y: 320 }
         ]) {
           try {
             const result = await dock?.debugDrop?.(spot);

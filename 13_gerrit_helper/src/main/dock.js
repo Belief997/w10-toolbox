@@ -222,7 +222,11 @@ function createDock(options) {
   function railGeometry() {
     const m = METRICS;
     const saved = livePosition || readConfig('position') || null;
-    const work = activeDisplay(saved).workArea;
+    const display = activeDisplay(saved);
+    const work = display.workArea;
+    // 底边吸附贴的是**屏幕**底边，不是工作区底边（任务栏上面那一线）：
+    // 面板是置顶窗口，画得比任务栏高，贴着屏幕底看起来才像"从边上长出来的"。
+    const screenBottom = display.bounds.y + display.bounds.height;
     // 轴向在拖动开始时锁住（横竖来回翻转会让窗口尺寸跳动），
     // 但"贴不贴边"必须跟着实时位置走 —— 否则拖离边缘时形状不动，只能等松手。
     // 没有落盘位置时默认贴右边缘 —— 这里必须先把 x 定下来再判"贴哪边"，
@@ -232,14 +236,28 @@ function createDock(options) {
     const leftGap = rawX - work.x;
     const rightGap = work.x + work.width - (rawX + m.railWidth);
     const topGap = rawY - work.y;
-    // 轴向：贴着顶边就横排。拖动中也实时跟位置走 —— 形态切换有 200ms 形变兜着，
+    // 横排时窗口高度就是厚度，所以"离底边多远"用厚度推得出来，不用等 along 算完。
+    // 底边有两个吸附位，翻轴判定统一用"是否越过任务栏上沿"这一条：
+    // 贴着屏幕底时下沿在任务栏上沿之下（负距离），照样算"在底下"。
+    const workBottom = work.y + work.height;
+    const railBottom = rawY + m.railWidth;
+    const bottomGap = workBottom - railBottom;
+    // 轴向：贴着顶边或底边就横排。拖动中也实时跟位置走 —— 形态切换有 200ms 形变兜着，
     // 不会再"啪"一下；这样从顶部拖下来时面板会边转边变成竖条。
-    // 角上按侧边处理（和松手时的 snap 一致），不然在右上角会来回翻。
+    // 角上按侧边处理（和松手时的 snap 一致），不然在右上角/右下角会来回翻。
     const horizontal = drag
-      ? (topGap <= 2 && leftGap > 2 && rightGap > 2)
-      : saved?.edge === 'top';
+      ? ((topGap <= 2 || bottomGap <= 2) && leftGap > 2 && rightGap > 2)
+      : (saved?.edge === 'top' || saved?.edge === 'bottom');
+    // 横排贴的是哪条边：拖动中看哪边近，不拖动就看落盘记录
+    const horizontalEdge = drag
+      ? (bottomGap < topGap ? 'bottom' : 'top')
+      : (saved?.edge === 'bottom' ? 'bottom' : 'top');
     const attached = horizontal
-      ? topGap <= 2
+      ? (drag ? true
+        : horizontalEdge === 'bottom'
+          // 贴任务栏上沿和贴屏幕底都算"贴边"，两种都有凹肩
+          ? Math.abs(railBottom - workBottom) <= 2 || Math.abs(railBottom - screenBottom) <= 2
+          : topGap <= 2)
       : (leftGap <= 2 || rightGap <= 2);
 
     // 贴边时两端要留出凹肩的空间（28）。悬空时没有凹肩，只留 2：
@@ -278,21 +296,23 @@ function createDock(options) {
       y = saved.y;
     } else if (horizontal) {
       x = work.x + Math.round((work.width - width) / 2);
-      y = work.y;
+      y = horizontalEdge === 'bottom' ? screenBottom - height : work.y;
     } else {
       x = work.x + work.width - thickness;
       y = work.y + m.screenMargin
         + Math.round((work.height - height - m.screenMargin * 2) * 0.5);
     }
 
-    // 任何时候都要求完整留在工作区内（撞到边界就是极限）
-    const clamped = clampToWorkArea({ x, y, width, height, workArea: work });
-    const side = horizontal ? 'top'
+    // 完整留在屏幕内（撞到边界就是极限）。**下沿放到屏幕底**：底边吸附的横条本来就
+    // 压在任务栏上；竖着的时候不放到屏幕底的话，它永远够不到底边，也就吸不上去。
+    const area = { x: work.x, y: work.y, width: work.width, height: Math.max(0, screenBottom - work.y) };
+    const clamped = clampToWorkArea({ x, y, width, height, workArea: area });
+    const side = horizontal ? horizontalEdge
       : (attached && leftGap <= 2) || (!attached && clamped.x + thickness / 2 < work.x + work.width / 2)
         ? 'left' : 'right';
     // edge 是"落盘/锁定"的形态，attached 是"此刻贴没贴边"。
     // 拖动中两者会不一样：形状跟 attached 走，松手时 snap 才结算 edge。
-    const edge = horizontal ? 'top' : (attached ? (leftGap <= 2 ? 'left' : 'right') : null);
+    const edge = horizontal ? horizontalEdge : (attached ? (leftGap <= 2 ? 'left' : 'right') : null);
     return {
       x: clamped.x, y: clamped.y, width, height, natural,
       cellSize, along, side, edge, horizontal, attached, topPad, thickness
@@ -343,15 +363,26 @@ function createDock(options) {
     return rest;
   }
 
+  // 底边有两个吸附位：横条下沿贴着任务栏上沿，或者贴着屏幕底。
+  // 按"更贴哪条"判，把手和唤醒热区都跟着它走。
+  function bottomAnchorY(rail) {
+    const display = activeDisplay();
+    const taskbarTop = display.workArea.y + display.workArea.height;
+    const screenBottom = display.bounds.y + display.bounds.height;
+    const railBottom = (rail?.y || 0) + (rail?.height || 0);
+    return Math.abs(railBottom - screenBottom) < Math.abs(railBottom - taskbarTop)
+      ? screenBottom : taskbarTop;
+  }
+
   function handleGeometry(rail) {
     const m = METRICS;
     const work = activeDisplay().workArea;
-    if (rail.side === 'top') {
-      // 横排时把手也是横的，贴在工作区顶边、竖条中段
+    if (rail.side === 'top' || rail.side === 'bottom') {
+      // 横排时把手也是横的，贴在屏幕顶边/底边（底边跟着实际吸附位）、竖条中段
       const width = Math.min(m.peekLength, Math.max(24, rail.width));
       return {
         x: rail.x + Math.round((rail.width - width) / 2),
-        y: work.y,
+        y: rail.side === 'top' ? work.y : bottomAnchorY(rail) - m.peekWidth,
         width,
         height: m.peekWidth
       };
@@ -372,8 +403,9 @@ function createDock(options) {
     const slot = cellSlots(rail)[focused];
     if (!slot) return null;
 
-    if (rail.side === 'top') {
-      // 竖条在顶部：卡片挂在它下面，尾巴朝上。窗口高度要多留尾巴那一截。
+    if (rail.side === 'top' || rail.side === 'bottom') {
+      // 竖条在顶部时卡片挂在它下面、尾巴朝上；贴底边时反过来（卡片在上方、尾巴朝下）。
+      // 两种都要在窗口里多留出尾巴那一截。
       const width = m.cardWidth;
       const height = Math.min(cardHeight + m.cardTail, work.height - m.screenMargin * 2);
       const centerX = rail.x + slot.left + slot.width / 2;
@@ -381,10 +413,15 @@ function createDock(options) {
         work.x + m.screenMargin,
         Math.min(work.x + work.width - width - m.screenMargin, centerX - width / 2)
       ));
-      const y = Math.round(Math.min(
-        rail.y + rail.height + m.cardGap,
-        work.y + work.height - height - m.screenMargin
-      ));
+      const y = rail.side === 'top'
+        ? Math.round(Math.min(
+          rail.y + rail.height + m.cardGap,
+          work.y + work.height - height - m.screenMargin
+        ))
+        : Math.round(Math.max(
+          work.y + m.screenMargin,
+          rail.y - m.cardGap - height
+        ));
       return { x, y, width, height, tailX: Math.round(centerX - x) };
     }
 
@@ -709,7 +746,10 @@ function createDock(options) {
     const { rail, handle, card } = layout({ pushCells: false });
     const point = screen.getCursorScreenPoint();
     const mode = readConfig('mode');
-    const work = activeDisplay().workArea;
+    const display = activeDisplay();
+    const work = display.workArea;
+    // 底边唤醒热区贴的是屏幕底（面板压在任务栏上）
+    const screenBottom = display.bounds.y + display.bounds.height;
     const now = Date.now();
 
     if (drag) {
@@ -718,7 +758,8 @@ function createDock(options) {
       else followDrag(point);
       toggleInteractive('rail', true);
       toggleInteractive('handle', false);
-      toggleInteractive('card', false);
+      // 卡片也要保持可点：拖拽可能是从卡片上开始的，松手那一下得能收到
+      toggleInteractive('card', true);
       return;
     }
 
@@ -730,8 +771,10 @@ function createDock(options) {
     // 这就是之前点不到卡片按钮的原因。
     const inCorridor = Boolean(card) && cardVisible && rectContains(cardCorridor(rail, card), point);
     // 靠边唤醒的热区：贴哪条边就看哪条边，范围跟着竖条的长度走
-    const inTrigger = !revealed && (rail.side === 'top'
-      ? point.y >= work.y && point.y <= work.y + EDGE_TRIGGER
+    const inTrigger = !revealed && (rail.side === 'top' || rail.side === 'bottom'
+      ? (rail.side === 'top'
+        ? point.y >= work.y && point.y <= work.y + EDGE_TRIGGER
+        : point.y >= bottomAnchorY(rail) - EDGE_TRIGGER && point.y <= screenBottom)
         && point.x >= rail.x && point.x <= rail.x + rail.width
       : (rail.side === 'right'
         ? point.x >= work.x + work.width - EDGE_TRIGGER && point.x <= work.x + work.width
@@ -847,9 +890,13 @@ function createDock(options) {
     // 不再锁轴向：横竖切换有形变过渡，跟着位置实时变才自然
     const origin = screen.getCursorScreenPoint();
     drag = {
-      pointer: origin, bounds,
+      pointer: origin,
+      bounds,
       lastPoint: { x: origin.x, y: origin.y },
-      lastMove: Date.now()
+      lastMove: Date.now(),
+      // 按"光标在面板里占几分之几"来拖，而不是按左上角的位移。
+      // 横竖翻转时长宽互换，比例重新套上去，光标仍旧压着同一格（见 anchorOf）。
+      anchor: anchorOf(railGeometry(), origin)
     };
     livePosition = { x: bounds.x, y: bounds.y };
     hideCard();
@@ -857,15 +904,44 @@ function createDock(options) {
     send('rail', 'dock:focus', { focused: -1 });
   }
 
+  // 光标在面板里的相对位置：along 是长轴（格子排布的方向），across 是厚度方向。
+  // 横排时长轴是 x，竖排是 y —— 翻转时长宽互换，这两个比例正好能接着用。
+  function anchorOf(geo, point) {
+    const long = geo.horizontal ? geo.width : geo.height;
+    const short = geo.horizontal ? geo.height : geo.width;
+    return {
+      along: (geo.horizontal ? point.x - geo.x : point.y - geo.y) / Math.max(1, long),
+      across: (geo.horizontal ? point.y - geo.y : point.x - geo.x) / Math.max(1, short)
+    };
+  }
+
+  // 按锚点把面板摆到光标下面（跨边、翻转都用同一套）
+  function placeUnderCursor(point, geo) {
+    livePosition = {
+      x: Math.round(geo.horizontal
+        ? point.x - drag.anchor.along * geo.width
+        : point.x - drag.anchor.across * geo.width),
+      y: Math.round(geo.horizontal
+        ? point.y - drag.anchor.across * geo.height
+        : point.y - drag.anchor.along * geo.height)
+    };
+    layout();
+  }
+
   function followDrag(point) {
     if (!drag) return;
     // 只有光标真的动了才刷新时间戳（见 shared/drag-watch.js 的说明）
     Object.assign(drag, nextDragClock(drag, point, Date.now()));
-    livePosition = {
-      x: Math.round(drag.bounds.x + (point.x - drag.pointer.x)),
-      y: Math.round(drag.bounds.y + (point.y - drag.pointer.y))
-    };
-    layout();
+    const before = railGeometry();
+    placeUnderCursor(point, before);
+    const after = railGeometry();
+    // 拖动中途翻轴（竖↔横）：长宽互换，按新尺寸再落一次位 ——
+    // 光标还压在原来那一格上，不会"拖第二个、转过来变成第三个"，
+    // 也不会因为窗口突然变高而被旧基准夹在原地（发粘）。
+    if (after.horizontal !== before.horizontal) placeUnderCursor(point, after);
+    // 被屏幕边界夹住时限位优先：把锚点校正成"实际位置"，
+    // 否则光标贴着边再走一段，面板都不动。
+    drag.anchor = anchorOf(railGeometry(), point);
   }
 
   function endDrag() {
@@ -877,11 +953,21 @@ function createDock(options) {
     let geometry = railGeometry();
     let edge = geometry.edge;
     if (readConfig('snap') === true) {
-      const work = activeDisplay(livePosition).workArea;
+      const display = activeDisplay(livePosition);
+      if (process.env.SNAP_TRACE === '1') {
+        logger.info?.(`[snap] 输入 ${JSON.stringify({
+          x: geometry.x, y: geometry.y, w: geometry.width, h: geometry.height,
+          work: display.workArea, bounds: display.bounds
+        })}`);
+      }
       const snapped = snapOnRelease({
         x: geometry.x, y: geometry.y,
         width: geometry.width, height: geometry.height,
-        workArea: work
+        // 贴到顶/底边之后会横过来，高度变厚度 —— 位置要按厚度算
+        thickness: METRICS.railWidth,
+        workArea: display.workArea,
+        // 底边吸到的是屏幕底（面板压在任务栏上），不是工作区底
+        bounds: display.bounds
       });
       // 带上 edge：这次 layout 还在用 livePosition，不带的话会按 x 猜成竖排，
       // 贴到顶部时会闪一下竖条再横过来
@@ -906,9 +992,12 @@ function createDock(options) {
   // 否则光标从卡片上方绕过去时卡片也不收。
   function cardCorridor(rail, card) {
     if (!rail || !card) return null;
-    if (rail.side === 'top') {
-      const from = Math.min(rail.y + rail.height, card.y);
-      const to = Math.max(rail.y + rail.height, card.y);
+    if (rail.side === 'top' || rail.side === 'bottom') {
+      // 横排：缝在竖条和卡片之间那条横带上（顶边卡片在下、底边卡片在上）
+      const railEdge = rail.side === 'top' ? rail.y + rail.height : rail.y;
+      const cardEdge = rail.side === 'top' ? card.y : card.y + card.height;
+      const from = Math.min(railEdge, cardEdge);
+      const to = Math.max(railEdge, cardEdge);
       return {
         x: Math.min(rail.x, card.x),
         y: from - 2,
@@ -1082,12 +1171,15 @@ function createDock(options) {
         layout();
       }
     });
+    // 拖拽可以从竖条上开始，也可以从卡片正文上开始（按在按钮上不算）
     ipcMain.on('dock:dragStart', (event) => {
-      if (surfaceOf(event.sender) !== 'rail') return;
+      const surface = surfaceOf(event.sender);
+      if (surface !== 'rail' && surface !== 'card') return;
       beginDrag();
     });
     ipcMain.on('dock:dragEnd', (event) => {
-      if (surfaceOf(event.sender) !== 'rail') return;
+      const surface = surfaceOf(event.sender);
+      if (surface !== 'rail' && surface !== 'card') return;
       endDrag();
     });
     ipcMain.on('dock:manualRefresh', () => options.onManualRefresh?.());
@@ -1107,7 +1199,12 @@ function createDock(options) {
     });
     ipcMain.on('dock:openUrl', (event, payload) => {
       const url = String(payload?.url || '');
-      if (/^https?:\/\//i.test(url)) onOpenUrl?.(url);
+      if (!/^https?:\/\//i.test(url)) {
+        logger.warn?.(`[dock] 拒绝打开（不是 http/https）：${url || '(空)'}`);
+        return;
+      }
+      logger.info?.(`[dock] 打开 ${url}`);
+      onOpenUrl?.(url);
     });
   }
 
@@ -1217,6 +1314,45 @@ function createDock(options) {
         total: cells.length,
         handle: handleGeometry(geometry), morphs: morphCount, snap: readConfig('snap')
       };
+    },
+
+    // 自检用：从当前位置按下拖动，按步长一点点挪光标，每一步记一次竖条的位置。
+    // 验的是"拖离边缘跟不跟手"：翻轴那一帧之后，y 应该和光标 1:1 地走。
+    debugDragAway: async ({ dx = 0, dy = -10, steps = 8 } = {}) => {
+      const win = wins.rail;
+      if (!running || !win || win.isDestroyed()) return null;
+      const bounds = win.getBounds();
+      // 抓第二格的正中间（竖排/横排都这么取）：翻轴之后光标应该还压在这一格上
+      const start = railGeometry();
+      const grab = cellSlots(start)[1] || cellSlots(start)[0];
+      const origin = grab
+        ? { x: start.x + grab.left + grab.width / 2, y: start.y + grab.top + grab.height / 2 }
+        : { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+      drag = {
+        pointer: origin, bounds, lastPoint: origin, lastMove: Date.now(),
+        anchor: anchorOf(railGeometry(), origin)
+      };
+      livePosition = { x: bounds.x, y: bounds.y };
+      layout();
+      const path = [];
+      for (let index = 0; index < steps; index += 1) {
+        const point = { x: origin.x + dx * (index + 1), y: origin.y + dy * (index + 1) };
+        followDrag(point);
+        const geo = railGeometry();
+        // 光标下面压着第几格：翻轴之后还应该是同一格
+        const rel = { x: point.x - geo.x, y: point.y - geo.y };
+        const item = cellSlots(geo).findIndex((slot) => rel.x >= slot.left && rel.x <= slot.left + slot.width
+          && rel.y >= slot.top && rel.y <= slot.top + slot.height);
+        path.push({
+          y: geo.y, horizontal: geo.horizontal, attached: geo.attached, item
+        });
+      }
+      // 收尾：不结算磁吸，位置原样放回（这个自检只量过程）
+      drag = null;
+      livePosition = null;
+      layout();
+      const back = railGeometry();
+      return { path, back: { x: back.x, y: back.y, horizontal: back.horizontal, attached: back.attached } };
     },
 
     // 自检用：走**渲染层那条真实路径**跑一次拖拽（合成 mousedown/mousemove/mouseup），
@@ -1407,11 +1543,67 @@ function createDock(options) {
       })()`).catch((error) => `(读取失败: ${error.message})`);
     },
 
+    // 自检用：读（可选：点）卡片上的「刷新」按钮，返回它当前的字和 data-state
+    debugRefreshButton: async (click = false) => {
+      const win = wins.card;
+      if (!win || win.isDestroyed()) return null;
+      return win.webContents.executeJavaScript(`(() => {
+        const buttons = [...document.querySelectorAll('.card-foot button')];
+        // 刷新状态会以 data-state 挂在按钮上，文案也在变 —— 两个都认
+        const button = buttons.find((el) => el.dataset.state || el.textContent.includes('刷新'));
+        if (!button) return { found: false, buttons: buttons.map((b) => b.textContent) };
+        const before = { text: button.textContent, state: button.dataset.state || 'idle', disabled: button.disabled };
+        if (${click ? 'true' : 'false'}) button.click();
+        return before;
+      })()`).catch((error) => `(读取失败: ${error.message})`);
+    },
+
+    // 自检用：第 index 格圆心在屏幕上的位置（DIP）。自检靠它把光标挪过去模拟悬停
+    debugRailPoint: (index = 0) => {
+      const geo = railGeometry();
+      const slot = cellSlots(geo)[index];
+      if (!slot) return null;
+      return {
+        x: Math.round(geo.x + slot.left + slot.width / 2),
+        y: Math.round(geo.y + slot.top + slot.height / 2)
+      };
+    },
+
+    // 自检用：按"悬停到第 index 格"来摆卡片（走的是真实的 hover 路径，
+    // 不是主动气泡 —— 气泡在光标进入时会让位/收起，没法用来测点击）
+    debugFocus: (index = 0) => {
+      if (!running) return null;
+      const list = visibleCells();
+      const target = list.length ? Math.min(Math.max(0, index), list.length - 1) : -1;
+      if (target < 0) return null;
+      focus(target);
+      showCardIfMeasured();
+      return { focused, cardVisible, cell: list[target]?.id || '' };
+    },
+
+    // 自检用：卡片里某个按钮在**屏幕**上的位置（窗口 bounds + DOM 里量到的偏移）
+    debugCardPoint: async (match = '') => {
+      const win = wins.card;
+      if (!win || win.isDestroyed()) return null;
+      const bounds = win.getBounds();
+      const point = await win.webContents.executeJavaScript(`(() => {
+        const button = [...document.querySelectorAll('.card-foot button')]
+          .find((el) => el.textContent.includes(${JSON.stringify(String(match))}));
+        if (!button) return null;
+        const r = button.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      })()`).catch(() => null);
+      if (!point) return null;
+      return { x: Math.round(bounds.x + point.x), y: Math.round(bounds.y + point.y) };
+    },
+
     refreshLayout: () => { layout(); pushAppearance(); },
     refreshAppearance: () => pushAppearance(),
     // 日志下载的结果推回卡片。卡片可能已经换成别的格子了 —— 渲染层按 cellId 对，
     // 对不上就扔掉，不当成当前这张卡片的状态。
     pushLogState: (payload) => send('card', 'dock:logState', payload || {}),
+    // 手动刷新的进度：running → done。卡片上的「刷新」按钮靠它转圈/回弹
+    pushRefreshState: (payload) => send('card', 'dock:refreshState', payload || {}),
     // seed = 重建时回填的旧数据；ok=false 表示这轮没拉到，
     // 两种都不算"已经拿到过数据"，面板继续显示"正在读取"
     setCells(next, { seed = false, ok = true } = {}) {

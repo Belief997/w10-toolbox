@@ -79,10 +79,7 @@
               </select>
             </label>
           </div>
-          <p class="hint">
-            密码在 Gerrit 的 <b>Settings → HTTP Credentials</b> 生成，不是登录密码；本机用系统 DPAPI 加密保存。
-            <b>~/.gitcookies</b> 模式不复制 cookie，每次请求现读那个文件。
-          </p>
+          <p class="hint">不是登录密码：Gerrit → Settings → HTTP Credentials 生成。本机用 DPAPI 加密保存。</p>
         </details>
         <div class="row">
           <button id="test" class="ghost">测试连接</button>
@@ -98,10 +95,7 @@
           <textarea id="track" rows="12" spellcheck="false"
             placeholder="10231&#10;I1a2b3c4d...&#10;q:reviewer:self is:open&#10;q:owner:self status:open"></textarea>
         </label>
-        <p class="hint">
-          <code>reviewer:self is:open</code> 待我评审 · <code>owner:self status:open</code> 我提交的 ·
-          <code>project:xxx status:open</code> 整个项目
-        </p>
+        <p class="hint"><code>reviewer:self</code> 待我评审 · <code>owner:self</code> 我提交的 · <code>project:xxx</code> 整个项目</p>
         <label class="field">
           <span>只看最近 <b id="recentValue">14</b> 天的改动（0 = 不限）</span>
           <input id="recentDays" type="range" min="0" max="60" step="1" />
@@ -120,7 +114,7 @@
 
       <section class="pane" data-pane="display">
         <h2>显示</h2>
-    <p class="hint">这里的改动会<b>立刻</b>应用到悬浮层，方便对着看效果；点「保存」才写进配置，直接关窗则复原。</p>
+    <p class="hint">改动<b>立刻</b>预览，点「保存」才写入配置。</p>
     <div id="previewState" class="result">预览：等待操作</div>
         <label class="field">
           <span>模式</span>
@@ -174,15 +168,15 @@
             <input id="jkToken" type="password" spellcheck="false" />
           </label>
         </div>
-        <p class="hint">
-          Token 在 Jenkins 右上角 <b>你的用户名 → Configure → API Token</b> 生成。
-          和 Gerrit 密码一样用系统 DPAPI 加密保存。
-        </p>
+        <p class="hint">Jenkins → 你的用户名 → Configure → API Token 生成。</p>
         <label class="field">
           <span>监控的 job（一行一个，folder 用 <code>/</code> 分隔）</span>
           <textarea id="jkJobs" rows="5" spellcheck="false"
             placeholder="ReleaseBuild~Demo~boardX~Arbitrary"></textarea>
         </label>
+        <div class="field">
+          <label class="check"><input id="jkAutoLog" type="checkbox" /> 构建失败后自动下载控制台日志</label>
+        </div>
         <div class="field">
           <span>控制台日志下载目录</span>
           <div class="row">
@@ -190,10 +184,7 @@
             <button id="jkLogDirPick" class="ghost" type="button">选择…</button>
           </div>
         </div>
-        <p class="hint">
-          留空 = 程序目录下的 <code>build_log</code>（第一次下载时自动创建）。
-          文件名是 <code>job名-构建号-console.txt</code>，同一轮重复下载会覆盖。
-        </p>
+        <p class="hint">留空 = 程序目录下的 <code>build_log</code>；文件名 <code>job名-构建号-console.txt</code>。</p>
         <div class="row">
           <button id="testJenkins" class="ghost">测试连接</button>
           <span id="jkResult" class="result"></span>
@@ -211,6 +202,23 @@
           <label><input id="notifyPatchset" type="checkbox" /> 上传新 patch set</label>
         </div>
         <p class="hint">同一事件跨轮不重复弹；一次刷新超过 3 条会合并成一条。</p>
+
+        <h2>构建结束发微信</h2>
+        <div class="field">
+          <label class="check"><input id="wechatEnabled" type="checkbox" /> 构建成功 / 失败时发一条微信</label>
+        </div>
+        <div class="field">
+          <span>微信流程文件</span>
+          <div class="row">
+            <input id="wechatFlow" type="text" spellcheck="false" placeholder="" />
+            <button id="wechatFlowPick" class="ghost" type="button">选择…</button>
+          </div>
+        </div>
+        <p class="hint">留空 = 同级 <code>14_wechat/build/recorded.json</code>；发送时抢焦点 1~2 秒。</p>
+        <div class="row">
+          <button id="testWechat" class="ghost" type="button">发一条测试消息</button>
+          <span id="wechatResult" class="result"></span>
+        </div>
       </section>
 
       <section class="pane" data-pane="advanced">
@@ -227,6 +235,11 @@
           <input id="allowInsecureCert" type="checkbox" />
           <span>允许不受信任的 HTTPS 证书（公司自签 CA 时打开）</span>
         </label>
+        <label class="check">
+          <input id="keepAwake" type="checkbox" />
+          <span>阻止休眠、息屏和自动锁屏（默认开）</span>
+        </label>
+        <p class="hint">屏幕会一直亮着；挡不住 Win+L。有强制锁屏规定的机器别开。</p>
         <label class="check">
           <input id="demoMode" type="checkbox" />
           <span>演示模式（不连服务器，用假数据）</span>
